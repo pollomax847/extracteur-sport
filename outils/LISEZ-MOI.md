@@ -33,11 +33,22 @@ outils/sport.py preparer                 # conversion précise → activites-v2/
 outils/sport.py sante                    # pas, poids, sommeil → sante/, Endurain ; pesées → Garmin
 outils/sport.py envoyer intervals 200    # 200 activités vers intervals.icu (garmin, strava, runalyze, endurain)
 outils/sport.py envoyer garmin 100 --reessayer
+outils/sport.py lots runalyze            # activités pas encore envoyées → a-importer/runalyze/lot-N, à importer sur le site
+outils/sport.py lots runalyze --importes # une fois l'import fait : notées envoyées, lots rangés dans a-supprimer/
 outils/sport.py montre                   # sauvegarde de la montre (lancé tout seul au branchement)
 outils/sport.py auto                     # montre + conversion + santé + envois choisis
 outils/sport.py refaire garmin           # retire de Garmin ce que l'ancienne version y a envoyé
 ```
 Une seule commande longue tourne à la fois, que ce soit dans le terminal ou l'interface. Le verrou est `outils/.verrou`.
+
+**Limites d'envoi des services** (vérifiées le 27/10/2026) :
+- Strava autorise 200 requêtes par 15 min et 2 000 par jour.
+- intervals.icu autorise 5 000 requêtes par jour avec une clé personnelle.
+- Garmin ne publie pas de limite.
+- Runalyze n'annonce aucune limite, mais Cloudflare bloque l'API après quelques centaines d'envois. Pour un gros
+  historique, utilisez `lots` et l'import du site : 1 000 fichiers au plus à la fois, doublons détectés par l'heure.
+
+Pour les nouvelles activités, Tapiriik (lien en haut de l'interface) peut synchroniser les services entre eux.
 
 ## Destinations
 | Service | Ce qu'il faut | Remarques |

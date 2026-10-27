@@ -6,6 +6,9 @@
   sport.py sante        pas, poids et sommeil de toutes les sources → sante/, Endurain (et les pesées → Garmin)
   sport.py envoyer <garmin|strava|intervals|runalyze|endurain> [N] [--reessayer]
                         envoie N activités de activites-v2/ (100 par défaut), de la plus ancienne à la plus récente
+  sport.py lots <destination> [--importes]
+                        copie les activités pas encore envoyées en lots à importer à la main sur le site du service
+                        (quand son API bloque un gros historique) ; --importes les note envoyées une fois l'import fait
   sport.py montre       sauvegarde la montre branchée et envoie ses nouvelles activités à Endurain
   sport.py auto         tout en une fois : montre, conversion, santé, envois choisis (SPORT_AUTO_DESTINATIONS)
   sport.py refaire garmin   retire de Garmin ce que l'ancienne version y a envoyé (avant d'envoyer activites-v2)
@@ -61,7 +64,7 @@ JETONS_GARMIN = Path.home() / ".config" / "sport" / "garmin-jetons"
 JETONS_STRAVA = Path.home() / ".config" / "sport" / "strava.json"
 VENV = Path.home() / ".local" / "share" / "sport" / "venv"
 VERROU = PROJET / "outils" / ".verrou"
-COMMANDES_EXCLUSIVES = {"envoyer", "sante", "auto", "refaire", "preparer"}
+COMMANDES_EXCLUSIVES = {"envoyer", "sante", "auto", "refaire", "preparer", "lots"}
 V2 = chemin(CHEMINS.get("activites", "activites-v2"))  # conversion précise : une activité par sortie réelle (sport.py preparer)
 CORBEILLE = chemin(CHEMINS.get("corbeille", "a-supprimer"))  # anciennes versions de activites-v2 (jamais effacées par l'outil)
 SANTE = chemin(CHEMINS.get("sante", "sante"))  # pas, poids et sommeil retenus, en CSV lisibles
@@ -78,6 +81,7 @@ SOURCES = {"projet": chemin(CHEMINS.get("donnees", ".")),
 #   sport.py convertir "<disque>/Google Drive/sport"
 # Dans le projet : outils, documentation et la copie de travail d'Endurain ne sont pas des données
 EXCLUS_PROJET = {"endurain", "outils", "scripts", "documentation", "sante", "a-supprimer", "activites-v2", "analyse",
+                 "a-importer",  # lots préparés pour un import manuel (sport.py lots) : des copies de activites-v2
                  SANTE.name, CORBEILLE.name, V2.name}
 
 # Dossiers de la montre qui contiennent vos données. Les autres (Debug, EDM, REMOTESW, TEXT…) sont internes à la montre.
@@ -362,13 +366,11 @@ def deja_envoyee(a, envoyees):
     return None
 
 
-def envoyer_v2(nom, limite, reessayer=False):
-    """Envoie au plus « limite » activités de activites-v2/ vers une destination, de la plus ancienne à la plus récente.
+def a_envoyer(nom, reessayer=False):
+    """Activités de activites-v2/ pas encore envoyées à une destination, de la plus ancienne à la plus récente.
 
     Une activité déjà envoyée sous un autre nom (même sortie) ou venue de ce service (Health Sync) n'est pas renvoyée :
-    elle est notée « deja » dans le journal."""
-    import destinations
-
+    elle est notée « deja » dans le journal. Renvoie (toutes les activités, état du journal, activités à envoyer)."""
     with (V2 / "index.csv").open() as f:
         activites = sorted(csv.DictReader(f), key=lambda a: a["debut_utc"])
     completer_journal(nom)
@@ -396,6 +398,14 @@ def envoyer_v2(nom, limite, reessayer=False):
                 journal.write(f"{a['fichier']}\t{statut}\t{a['debut_utc']}\t{a['duree_min']}\n")
                 print(f"  {a['fichier']} : {statut}")
         etat = etat_envois(nom)
+    return activites, etat, a_faire
+
+
+def envoyer_v2(nom, limite, reessayer=False):
+    """Envoie au plus « limite » activités de activites-v2/ vers une destination (voir a_envoyer)."""
+    import destinations
+
+    activites, etat, a_faire = a_envoyer(nom, reessayer)
     a_faire = a_faire[:limite]
     print(f"{nom} : {len(activites)} activités, {len(etat)} déjà traitées, {len(a_faire)} à envoyer maintenant")
     if not a_faire:
@@ -438,6 +448,57 @@ def cmd_envoyer():
     utiliser_venv()
     nombres = [a for a in args[1:] if a.isdigit()]
     envoyer_v2(args[0], int(nombres[0]) if nombres else 100, "--reessayer" in args)
+
+
+LOTS = PROJET / "a-importer"  # lots à importer à la main sur le site d'un service (sport.py lots)
+TAILLE_LOT = 900  # fichiers par lot : Runalyze conseille au plus 1000 à la fois dans le navigateur
+
+
+def cmd_lots():
+    """sport.py lots <destination> [--importes] : quand l'API d'un service bloque un gros historique (Runalyze et
+    Cloudflare, 27/10/2026), copie les activités pas encore envoyées dans a-importer/<destination>/lot-N/, à glisser
+    dans la page d'import du site. Une fois l'import fait, --importes les note envoyées dans le journal et range les
+    lots dans a-supprimer/."""
+    args = sys.argv[2:]
+    if not args or args[0] not in DESTINATIONS:
+        sys.exit(f"Usage : sport.py lots <{'|'.join(DESTINATIONS)}> [--importes]")
+    nom, dossier = args[0], LOTS / args[0]
+    liste = dossier / "liste.csv"
+    if "--importes" in args:
+        if not liste.exists():
+            sys.exit(f"Aucun lot préparé pour {nom} ({dossier})")
+        with liste.open() as f, journal_envois(nom).open("a") as journal:
+            lignes = list(csv.DictReader(f))
+            for l in lignes:
+                journal.write(f"{l['fichier']}\timport manuel\t{l['debut_utc']}\t{l['duree_min']}\n")
+        rangement = CORBEILLE / time.strftime("%Y-%m-%d_%H%M") / f"a-importer-{nom}"
+        rangement.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(dossier, rangement)
+        print(f"{nom} : {len(lignes)} activités notées « import manuel » ; lots rangés dans {rangement}")
+        return
+    if dossier.exists():
+        sys.exit(f"Des lots attendent déjà dans {dossier} : importez-les puis « sport.py lots {nom} --importes »")
+    _, _, a_faire = a_envoyer(nom)
+    if not a_faire:
+        print(f"{nom} : rien à importer")
+        return
+    noms = Counter(Path(a["fichier"]).name for a in a_faire)
+    dossier.mkdir(parents=True)
+    with liste.open("w", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=["lot", "copie", "fichier", "debut_utc", "duree_min"])
+        w.writeheader()
+        for n, a in enumerate(a_faire):
+            lot = dossier / f"lot-{n // TAILLE_LOT + 1}"
+            lot.mkdir(exist_ok=True)
+            source = V2 / a["fichier"]
+            # même nom dans deux catégories : la catégorie en préfixe
+            copie = source.name if noms[source.name] == 1 else f"{a['categorie']}_{source.name}"
+            shutil.copyfile(source, lot / copie)
+            w.writerow({"lot": lot.name, "copie": copie, "fichier": a["fichier"], "debut_utc": a["debut_utc"],
+                        "duree_min": a["duree_min"]})
+    lots = (len(a_faire) - 1) // TAILLE_LOT + 1
+    print(f"{nom} : {len(a_faire)} activités copiées en {lots} lot(s) dans {dossier}")
+    print(f"  importez chaque lot sur le site, puis : sport.py lots {nom} --importes")
 
 
 class Endurain:
@@ -755,6 +816,7 @@ def main():
         "auto": cmd_auto,
         "refaire": cmd_refaire,
         "preparer": cmd_preparer,
+        "lots": cmd_lots,
     }
     if len(sys.argv) < 2 or sys.argv[1] not in commandes:
         sys.exit(__doc__)

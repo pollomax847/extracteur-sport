@@ -29,7 +29,8 @@
   .puce { font-size: 12.5px; padding: 3px 10px; border-radius: 999px; background: var(--carte); border: 1px solid var(--bord); color: var(--doux); white-space: nowrap; cursor: help; }
   .puce b { font-weight: 600; }
   .puce.ok b { color: var(--ok); } .puce.ko b { color: var(--ko); } .puce.attente b { color: var(--attente); }
-  .barre a { margin-left: auto; color: var(--accent); text-decoration: none; font-weight: 500; font-size: 14px; }
+  .barre .liens { margin-left: auto; display: flex; gap: 16px; flex-wrap: wrap; }
+  .barre a { color: var(--accent); text-decoration: none; font-weight: 500; font-size: 14px; }
   h2 { font-size: 15px; margin: 0; }
   .titre-section { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--doux); margin: 28px 0 10px; }
   /* toutes les cartes d'une rangée ont la même hauteur ; leurs boutons sont alignés en bas */
@@ -79,7 +80,7 @@
   #message { min-height: 20px; margin: 10px 0 0; font-size: 14px; }
   .ok { color: var(--ok); } .ko { color: var(--ko); }
   a { color: var(--accent); }
-  @media (max-width: 600px) { .barre a { margin-left: 0; } .chiffre b { font-size: 20px; } }
+  @media (max-width: 600px) { .barre .liens { margin-left: 0; } .chiffre b { font-size: 20px; } }
 </style>
 </head>
 <body>
@@ -92,7 +93,10 @@
       <span class="puce" id="p-auto" title="« Tout faire » lancé chaque nuit (SPORT_AUTO_HEURE dans docker-compose.yml)">Passage de nuit <b>…</b></span>
       <span class="puce" id="p-tache" title="Une seule commande à la fois">Commande <b>aucune</b></span>
     </div>
-    <a id="lien-endurain" href="http://localhost:8080" target="_blank" rel="noopener">Ouvrir Endurain ↗</a>
+    <div class="liens">
+      <a id="lien-endurain" href="http://localhost:8080" target="_blank" rel="noopener">Ouvrir Endurain ↗</a>
+      <a href="https://tapiriik.com" target="_blank" rel="noopener" title="Synchronise automatiquement les nouvelles activités entre services (Garmin, Strava, Runalyze…)">Tapiriik ↗</a>
+    </div>
   </div>
 </header>
 
