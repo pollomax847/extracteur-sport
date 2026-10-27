@@ -63,7 +63,7 @@
   .case { display: flex; align-items: center; gap: 6px; color: var(--texte); font-size: 13.5px; margin: 8px 0 0; }
   .rangee { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
   .rangee + .rangee { margin-top: 8px; }
-  .envoi { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: end; }
+  .envoi { display: flex; justify-content: flex-end; }
   .envoi label { margin-top: 0; }
   button { padding: 8px 14px; border: 0; border-radius: 8px; background: var(--accent); color: #fff; font: inherit; font-weight: 500; cursor: pointer; }
   button.second { background: transparent; color: var(--accent); border: 1px solid var(--bord); }
@@ -202,7 +202,6 @@
     </dl>
     <div class="bas">
       <div class="envoi d-envoi">
-        <div><label>Combien en envoyer</label><input type="number" class="d-nombre" min="1" value="100"></div>
         <button class="d-envoyer">Envoyer</button>
       </div>
       <label class="case d-case-reessayer" hidden><input type="checkbox" class="d-reessayer"> Retenter aussi les refusées</label>
@@ -223,16 +222,20 @@ const NOMS_CATEGORIES = {
 const DESTINATIONS = {
   garmin: { titre: "Garmin Connect", aide: "Coupez la liaison Strava dans Garmin pendant l'envoi de l'historique : sinon Strava reçoit tout aussi.",
             config: null, pasPret: "Connectez-vous dans « Comptes » plus bas." },
-  strava: { titre: "Strava", aide: "Créez une application sur strava.com/settings/api (domaine de rappel : localhost), puis configurez-la ici.",
+  strava: { titre: "Strava", aide: "Sur la page Strava, créez une application (« Authorization Callback Domain » : localhost), puis recopiez son Client ID et son Secret ici.",
+            page: "https://www.strava.com/settings/api", obtenir: "Créer l'application sur Strava",
             config: [["STRAVA_CLIENT_ID", "Client ID", "text"], ["STRAVA_CLIENT_SECRET", "Client Secret", "password"]] },
-  intervals: { titre: "intervals.icu", aide: "Gratuit ; refuse lui-même les doublons. Clé dans Settings → Developer Settings.",
+  intervals: { titre: "intervals.icu", aide: "Gratuit ; refuse lui-même les doublons. La clé est en bas de la page, dans « Developer Settings ».",
+               page: "https://intervals.icu/settings", obtenir: "Obtenir la clé sur intervals.icu",
                config: [["INTERVALS_API_KEY", "Clé d'API", "password"]] },
-  runalyze: { titre: "Runalyze", aide: "Jeton « Personal API » (Réglages). Le chemin d'envoi est vérifié au premier fichier.",
+  runalyze: { titre: "Runalyze", aide: "Créez un jeton « Personal API » sur la page Runalyze, puis recopiez-le ici.",
+              page: "https://runalyze.com/settings/personal-api", obtenir: "Obtenir le jeton sur Runalyze",
               config: [["RUNALYZE_TOKEN", "Jeton", "password"]] },
   endurain: { titre: "Endurain", aide: "Votre bibliothèque locale. Elle écarte elle-même les doublons.", config: null,
               pasPret: "Clé d'API absente de sport.env." },
-  smashrun: { titre: "Smashrun", aide: "Course à pied seulement. « Autoriser » récupère le jeton ; il expire au bout de 12 semaines, il suffit alors de recliquer.",
-              autoriser: "/smashrun/autoriser", config: [["SMASHRUN_TOKEN", "ou collez un jeton", "password"]] },
+  smashrun: { titre: "Smashrun", aide: "Course à pied seulement. Le bouton vous connecte à Smashrun et récupère le jeton tout seul ; il expire au bout de 12 semaines, il suffit alors de recliquer.",
+              autoriser: "/smashrun/autoriser", obtenir: "Autoriser Smashrun",
+              config: [["SMASHRUN_TOKEN", "Jeton (facultatif, récupéré tout seul)", "password"]] },
 };
 let lues = 0, commandeAffichee = null, enCours = false, commandeEnCours = "";
 
@@ -260,28 +263,38 @@ function construireDestinations() {
     carte.id = `d-${nom}`;
     carte.querySelector(".d-titre").textContent = d.titre;
     carte.querySelector(".d-aide").textContent = d.aide;
-    const champ = carte.querySelector(".d-nombre");
-    champ.id = `${nom}-nombre`;
-    carte.querySelector(".d-envoi label").htmlFor = champ.id;
-    champ.addEventListener("input", () => (champ.dataset.touche = "1"));
     carte.querySelector(".d-reessayer").addEventListener("change", rafraichirEtat);
+    // tout ce qui reste, au rythme permis par le service ; s'il demande d'attendre, un nouveau clic reprend
     carte.querySelector(".d-envoyer").addEventListener("click", () => lancer({
-      commande: "envoyer", destination: nom, nombre: champ.value, reessayer: carte.querySelector(".d-reessayer").checked }));
+      commande: "envoyer", destination: nom, reessayer: carte.querySelector(".d-reessayer").checked }));
     if (d.config) {
       const form = carte.querySelector(".d-form");
-      if (d.autoriser) {
-        form.insertAdjacentHTML("beforeend", `<div class="rangee" style="margin-bottom:10px"><button type="button" class="d-autoriser">Autoriser ${d.titre}</button></div>`);
-        form.querySelector(".d-autoriser").addEventListener("click", () => (window.location.href = d.autoriser));
-      }
       for (const [cle, libelle, type] of d.config) {
-        form.insertAdjacentHTML("beforeend", `<label for="${nom}-${cle}">${libelle}</label><input id="${nom}-${cle}" name="${cle}" type="${type}" autocomplete="off" required>`);
+        form.insertAdjacentHTML("beforeend", `<label for="${nom}-${cle}">${libelle}</label><input id="${nom}-${cle}" name="${cle}" type="${type}" autocomplete="off">`);
       }
-      form.insertAdjacentHTML("beforeend", `<div class="rangee" style="margin-top:10px"><button type="submit">${nom === "strava" ? "Enregistrer et autoriser" : "Vérifier et enregistrer"}</button></div>`);
+      // un seul bouton : tant que les champs sont vides, il mène à la page du service où l'on obtient la clé (ou
+      // autorise directement) ; une fois les champs remplis, il enregistre
+      form.insertAdjacentHTML("beforeend", `<div class="rangee" style="margin-top:10px"><button class="d-bouton"></button></div>`);
+      const bouton = form.querySelector(".d-bouton");
+      const champs = [...form.querySelectorAll("input")];
+      const majBouton = () => {
+        const rempli = champs.every((c) => c.value.trim());
+        bouton.type = rempli ? "submit" : "button";
+        bouton.textContent = rempli ? (nom === "strava" ? "Enregistrer et autoriser" : "Enregistrer")
+                                    : d.obtenir + (d.autoriser ? "" : " ↗");
+      };
+      champs.forEach((c) => c.addEventListener("input", majBouton));
+      majBouton();
+      bouton.addEventListener("click", () => {
+        if (bouton.type === "submit") return;
+        if (d.autoriser) window.location.href = d.autoriser;
+        else window.open(d.page, "_blank", "noopener");
+      });
       form.addEventListener("submit", async (ev) => {
         ev.preventDefault();
         try {
           const r = await api("/api/destination", { nom, champs: Object.fromEntries(new FormData(form)) });
-          form.reset();
+          form.reset(); majBouton();
           if (r.autoriser) { window.location.href = r.autoriser; return; }
           message(`${d.titre} : connecté (${r.compte}).`); rafraichirEtat();
         } catch (err) { message(`${d.titre} : ${err.message}`, true); }
@@ -315,10 +328,12 @@ function majDestination(nom, d) {
   const pasPret = carte.querySelector(".d-pas-pret");
   pasPret.hidden = d.configuree || !DESTINATIONS[nom].pasPret;
   pasPret.textContent = DESTINATIONS[nom].pasPret || "";
-  carte.querySelector(".d-config").open = !d.configuree && carte.querySelector(".d-config").open;
-  const champ = carte.querySelector(".d-nombre");
-  if (!champ.dataset.touche) champ.value = Math.max(1, Math.min(100, restantes || d.refuse || 100));
+  // pas encore configuré : la configuration s'ouvre d'elle-même (une fois, pour pouvoir la replier)
+  const config = carte.querySelector(".d-config");
+  if (!d.configuree && !carte.dataset.ouverte) { config.open = true; carte.dataset.ouverte = "1"; }
+  if (d.configuree) config.open = false;
   const bouton = carte.querySelector(".d-envoyer");
+  bouton.textContent = restantes ? `Envoyer les ${nombre(restantes)}` : "Envoyer";
   bouton.disabled = enCours || !d.configuree || (!restantes && !(d.refuse && carte.querySelector(".d-reessayer").checked));
   bouton.title = enCours ? "Une commande est déjà en cours" : !restantes ? "Rien de nouveau à envoyer" : "";
 }

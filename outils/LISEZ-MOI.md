@@ -31,8 +31,8 @@ Après une modification du code : `cd endurain && docker compose restart sport`.
 ```bash
 outils/sport.py preparer                 # conversion précise → activites-v2/ (+ contrôle de chaque FIT)
 outils/sport.py sante                    # pas, poids, sommeil → sante/, Endurain ; pesées → Garmin
-outils/sport.py envoyer intervals 200    # 200 activités vers intervals.icu (garmin, strava, runalyze, endurain)
-outils/sport.py envoyer garmin 100 --reessayer
+outils/sport.py envoyer intervals        # tout ce qui reste vers intervals.icu (garmin, strava, runalyze, endurain, smashrun)
+outils/sport.py envoyer garmin 50        # seulement 50 ; --reessayer retente aussi les refusées
 outils/sport.py lots runalyze            # activités pas encore envoyées → a-importer/runalyze/lot-N, à importer sur le site
 outils/sport.py lots runalyze --importes # une fois l'import fait : notées envoyées, lots rangés dans a-supprimer/
 outils/sport.py montre                   # sauvegarde de la montre (lancé tout seul au branchement)
@@ -61,6 +61,11 @@ Pour les nouvelles activités, Tapiriik (lien en haut de l'interface) peut synch
 | **Smashrun** | bouton « Autoriser Smashrun » dans l'interface : connexion à Smashrun, le jeton est récupéré tout seul (12 semaines, recliquer ensuite) | course à pied avec distance seulement ; avant d'envoyer, l'outil lit les courses déjà sur le compte (venues de Garmin, Strava…) et ne les renvoie pas ; sans trace, la course part en JSON ; 250 envois par heure |
 
 Decathlon n'accepte pas l'envoi de fichiers : reliez-le à Garmin.
+
+Dans l'interface, chaque service a un seul bouton : tant que les champs sont vides, il ouvre la page du service où
+l'on obtient la clé (ou autorise directement, pour Smashrun) ; une fois les champs remplis, il enregistre. « Envoyer »
+envoie tout ce qui reste, au rythme permis par le service ; s'il demande d'attendre, l'envoi s'arrête et un nouveau clic
+reprend.
 
 Les clés sont vérifiées auprès du service avant d'être enregistrées dans `~/.config/sport/sport.env`, lisible par vous seul.
 Le mode automatique n'envoie que vers les services listés dans `SPORT_AUTO_DESTINATIONS=garmin,intervals` (sport.env) : aucun par défaut.

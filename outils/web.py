@@ -120,8 +120,9 @@ def etat():
     destinations = {}
     for nom in sport.DESTINATIONS:
         envois = sport.etat_envois(nom)
-        statuts = Counter(v.split(" :")[0] for v in envois.values())
         proposees = [l for l in bibliotheque if sport.proposee(nom, l)]  # Smashrun : courses avec distance
+        # statuts des seules activités proposées (le journal garde aussi d'anciens noms et des activités non proposées)
+        statuts = Counter(envois[l["fichier"]].split(" :")[0] for l in proposees if l["fichier"] in envois)
         destinations[nom] = {"configuree": destination_configuree(nom, conf), "envoye": statuts.get("envoye", 0),
                              "deja": statuts.get("deja", 0), "refuse": statuts.get("refuse", 0), "total": len(proposees),
                              # activités de la bibliothèque actuelle jamais traitées (le journal garde aussi d'anciens noms)
@@ -213,7 +214,7 @@ def arguments(demande):
         cible = demande.get("destination") or "garmin"
         if cible not in sport.DESTINATIONS:
             raise ValueError(f"destination inconnue : {cible}")
-        args = ["envoyer", cible, str(int(demande.get("nombre") or 100))]
+        args = ["envoyer", cible] + ([str(int(demande["nombre"]))] if demande.get("nombre") else [])  # tout par défaut
         return args + (["--reessayer"] if demande.get("reessayer") else [])
     raise ValueError(f"commande inconnue : {commande}")
 

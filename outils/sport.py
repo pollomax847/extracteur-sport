@@ -5,7 +5,8 @@
                         par sortie réelle, en FIT, rangée par catégorie dans activites-v2/ (+ contrôle)
   sport.py sante        pas, poids et sommeil de toutes les sources → sante/, Endurain (et les pesées → Garmin)
   sport.py envoyer <garmin|strava|intervals|runalyze|endurain|smashrun> [N] [--reessayer]
-                        envoie N activités de activites-v2/ (100 par défaut), de la plus ancienne à la plus récente
+                        envoie tout ce qui reste de activites-v2/ (ou N activités), de la plus ancienne à la plus
+                        récente, au rythme permis par le service
   sport.py lots <destination> [--importes]
                         copie les activités pas encore envoyées en lots à importer à la main sur le site du service
                         (quand son API bloque un gros historique) ; --importes les note envoyées une fois l'import fait
@@ -483,13 +484,14 @@ def envoyer_v2(nom, limite, reessayer=False):
 
 
 def cmd_envoyer():
-    """sport.py envoyer <destination> [N] [--reessayer] : N activités de activites-v2/ (100 par défaut)."""
+    """sport.py envoyer <destination> [N] [--reessayer] : tout ce qui reste (ou N activités), au rythme permis par le
+    service (PAUSES) ; s'il demande d'attendre, l'envoi s'arrête proprement et reprend au lancement suivant."""
     args = sys.argv[2:]
     if not args or args[0] not in DESTINATIONS:
-        sys.exit(f"Usage : sport.py envoyer <{'|'.join(DESTINATIONS)}> [nombre, 100 par défaut] [--reessayer]")
+        sys.exit(f"Usage : sport.py envoyer <{'|'.join(DESTINATIONS)}> [nombre, tout par défaut] [--reessayer]")
     utiliser_venv()
     nombres = [a for a in args[1:] if a.isdigit()]
-    envoyer_v2(args[0], int(nombres[0]) if nombres else 100, "--reessayer" in args)
+    envoyer_v2(args[0], int(nombres[0]) if nombres else None, "--reessayer" in args)
 
 
 LOTS = PROJET / "a-importer"  # lots à importer à la main sur le site d'un service (sport.py lots)
