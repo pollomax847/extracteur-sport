@@ -171,6 +171,9 @@ def fusionner(membres):
     return meilleur, membres
 
 
+INTERIEUR_MAX = 1500  # m : une séance de montre plus lente que la marche n'est « à l'intérieur » qu'en deçà
+
+
 def decider_sport(s):
     """Garde, corrige ou écarte selon la vitesse. Renvoie None si la séance est gardée, sinon la raison."""
     if s.sport == "swimming" and s.sous_sport not in ("lap_swimming", "open_water"):
@@ -181,6 +184,14 @@ def decider_sport(s):
     v = s.vitesse()
     if s.sport in ("walking", "hiking", "running", "other") and v and v > VEHICULE:
         return f"vitesse de véhicule ({v:.0f} km/h)"
+    if (v and v < VITESSE["walking"][0] and s.distance < INTERIEUR_MAX and s.original and s.enregistreur in APPAREILS_GPS
+            and s.sport in ("walking", "hiking", "running", "other")):
+        # séance lancée volontairement sur la montre presque sans avancer (à l'intérieur, sur place, confinement
+        # d'avril 2020) : une vraie séance au GPS inutile, pas une erreur de données. Au-delà d'INTERIEUR_MAX, c'est
+        # une longue sortie entrecoupée de pauses (ex. 5,6 km en 4 h), laissée aux règles ordinaires
+        s.qualite.append(f"marche à l'intérieur ou sur place ({v:.1f} km/h, séance lancée sur la montre)")
+        s.sport, s.sous_sport = "walking", "indoor_walking"
+        return None
     if s.sport == "other":
         if not v:
             return "sport inconnu, sans distance pour le deviner"
@@ -285,8 +296,9 @@ def decouper(s):
     deux) ; le sport d'un segment à pied est la course si plus de la moitié de ses minutes vont à plus de 7 km/h."""
     from dataclasses import replace
 
-    # seulement un enregistrement d'origine : une copie de plusieurs heures est une journée recopiée (écartée)
-    if not (s.original and s.gps and s.duree >= DUREE_DECOUPAGE
+    # seulement un enregistrement d'origine : une copie de plusieurs heures est une journée recopiée (écartée) ;
+    # ni une séance dont la montre donne le temps en mouvement : lancée volontairement, ses pauses en font partie
+    if not (s.original and s.gps and s.duree >= DUREE_DECOUPAGE and not s.en_mouvement
             and s.sport in ("walking", "running", "hiking", "cycling", "other")):
         return [s]
     pts = [p for p in s.points() if p.lat is not None]
@@ -338,7 +350,7 @@ def decouper(s):
             sport = "running" if rapides > 0.5 else ("hiking" if s.sport == "hiking" else "walking")
         a = replace(s, debut=morceau[0].temps, duree=(morceau[-1].temps - morceau[0].temps).total_seconds(),
                     distance=sum(fitconv._distance(x, y) for x, y in zip(morceau, morceau[1:])), sport=sport,
-                    sous_sport="generic", sport_sur=True, calories=None, nb_points=len(morceau),
+                    sous_sport="generic", sport_sur=True, calories=None, nb_points=len(morceau), en_mouvement=None,
                     qualite=s.qualite + [f"découpée d'une trace de {s.duree / 3600:.1f} h"],
                     _points=lambda morceau=morceau: morceau)
         activites.append(a)
@@ -353,6 +365,7 @@ def raison_duree(s):
     return None
 
 
+TYPES_ACTIVITE = {"hiking": "walking"}  # pour le recollage, une randonnée est une marche
 PAUSE_RECOLLAGE = 3 * 60  # s : deux morceaux trop courts séparés de moins de 3 min forment une même sortie
 FAMILLES_RECOLLAGE = {"walking": "pied", "hiking": "pied", "running": "pied", "other": "pied", "cycling": "velo"}
 
@@ -384,7 +397,7 @@ def _recollee(morceaux):
                    distance=distance or None, sport=sport, sous_sport="generic", sport_sur=sport != "other",
                    calories=calories, fc_moy=None, fc_max=None, nb_points=sum(s.nb_points for s, _ in morceaux),
                    gps=any(s.gps for s, _ in morceaux), cardio=False, titre=None,
-                   heure_douteuse=any(s.heure_douteuse for s, _ in morceaux),
+                   heure_douteuse=any(s.heure_douteuse for s, _ in morceaux), en_mouvement=None,
                    qualite=[f"recollée de {len(morceaux)} morceaux trop courts "
                             f"({en_mouvement / 60:.0f} min en mouvement sur {(fin - premier.debut).total_seconds() / 60:.0f})"],
                    _points=points)
@@ -394,12 +407,21 @@ def recoller(courts, gardees):
     """Morceaux trop courts → (activités recollées, morceaux écartés). Les morceaux qui se suivent à moins de
     PAUSE_RECOLLAGE, de même famille (à pied, vélo), forment une sortie ; elle est gardée si elle passe les mêmes
     filtres qu'une séance ordinaire et ne tombe pas pendant une activité déjà retenue (sinon c'en est un bout)."""
-    retenues = sorted((s.debut, s.fin) for s, _, _ in gardees)
-    debuts = [d for d, _ in retenues]
+    retenues = sorted((s.debut, s.fin, TYPES_ACTIVITE.get(s.sport, s.sport)) for s, _, _ in gardees)
+    debuts = [d for d, _, _ in retenues]
 
-    def pendant_une_retenue(debut, fin):
-        i = bisect.bisect_left(debuts, fin)
-        return any(d < fin and f > debut for d, f in retenues[max(0, i - 50):i])
+    def pendant_une_retenue(r):
+        """Un bout d'une activité retenue : la chevauche et du même type (une marche découpée autrement par une
+        autre appli), ou recouverte pour plus de moitié. Sinon, une sortie à part qui la touche (ex. 12 min de course
+        juste après une marche de montre dont la fin déborde de 4 min)."""
+        i = bisect.bisect_left(debuts, r.fin)
+        commun = 0.0
+        for d, f, type_ in retenues[max(0, i - 50):i]:
+            recouvert = max(0.0, (min(f, r.fin) - max(d, r.debut)).total_seconds())
+            if recouvert and type_ == TYPES_ACTIVITE.get(r.sport, r.sport):
+                return True
+            commun += recouvert
+        return commun > 0.5 * r.duree
 
     suites, courante = [], None
     for s, membres in sorted(courts, key=lambda c: (c[0].debut, c[0].source, _relatif(c[0].chemin))):
@@ -417,10 +439,11 @@ def recoller(courts, gardees):
         raison = None
         if len(morceaux) > 1:
             r = _recollee(morceaux)
-            if pendant_une_retenue(r.debut, r.fin):
+            raison = decider_sport(r)  # d'abord : le sport décide de quel type d'activité ce serait un bout
+            if pendant_une_retenue(r):
                 raison = "morceau d'une activité déjà retenue"
             else:
-                raison = decider_sport(r) or raison_duree(r) or raison_journee(r)
+                raison = raison or raison_duree(r) or raison_journee(r)
                 if not raison:
                     recollees.append((r, [m for _, membres in morceaux for m in membres], None))
                     continue

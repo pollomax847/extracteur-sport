@@ -64,6 +64,7 @@ class Seance:
     titre: str | None = None
     chemin: str = ""
     heure_douteuse: bool = False  # fuseau inconnu : peut être décalée d'un nombre entier d'heures
+    en_mouvement: float | None = None  # s : temps en mouvement quand la source le donne (vitesse sans les pauses)
     qualite: list = field(default_factory=list)  # remarques (interpolée, GPS clairsemé…)
     _points: object = field(default=None, repr=False)  # fonction qui charge les points (lecture paresseuse)
 
@@ -72,7 +73,8 @@ class Seance:
         return self.debut + timedelta(seconds=self.duree)
 
     def vitesse(self):
-        return self.distance / self.duree * 3.6 if self.distance and self.duree else None
+        temps = self.en_mouvement or self.duree
+        return self.distance / temps * 3.6 if self.distance and temps else None
 
     def points(self):
         return self._points() if self._points else []
@@ -565,6 +567,8 @@ def reconnaitre(fichier):
     parent = _nfc(fichier.parent.name)
     if nom.endswith(".icloud"):
         return None
+    if nom == "summaries.json":
+        return lire_resumes_zepp(fichier)
     if HEALTH_SYNC_NOM.fullmatch(nom):
         # une séance = FIT, TCX, GPX et KML du même nom : lue une fois, par le FIT (à défaut le TCX, puis le GPX)
         for principal in (".fit", ".tcx", ".gpx"):
@@ -613,12 +617,39 @@ def reconnaitre(fichier):
 
 
 EMPREINTES_TOMTOM = {}  # chemin → (SHA-1 du contenu, nommé « (copie) »), rempli par reconnaitre()
+RESUMES_ZEPP = {}  # trackid → résumé de summaries.json (export Mi Fit / Zepp), rempli par reconnaitre()
+
+
+def lire_resumes_zepp(fichier):
+    """summaries.json de l'export Zepp : un résumé par trace (trackid = départ), avec le temps en mouvement (run_time)
+    et la distance retenue par la montre. Les traces elles-mêmes sont lues par leurs FIT (RUNNING-<trackid>.fit…)."""
+    resumes = json.loads(fichiers.texte(fichier))
+    if isinstance(resumes, list):
+        RESUMES_ZEPP.update({str(r["trackid"]): r for r in resumes if isinstance(r, dict) and "trackid" in r})
+    return None
+
+
+def completer_zepp(s):
+    """Temps en mouvement et distance du résumé Zepp : les FIT convertis comptent les pauses (ex. 1,9 km en 31 min
+    de marche, mais 96 min au total), et leur distance peut inclure la dérive du GPS pendant les pauses."""
+    m = re.search(r"-(\d+)\.fit$", s.chemin)
+    resume = m and RESUMES_ZEPP.get(m[1])
+    if not resume:
+        return
+    mouvement, distance = float(resume.get("run_time") or 0), float(resume.get("dis") or 0)
+    if 0 < mouvement < s.duree - 60:
+        s.en_mouvement = mouvement
+        s.qualite.append(f"vitesse sur le temps en mouvement ({mouvement / 60:.0f} min sur {s.duree / 60:.0f}, résumé Zepp)")
+    if distance > 0 and s.distance and abs(distance - s.distance) > 0.05 * distance:
+        s.qualite.append(f"distance du résumé Zepp ({distance / 1000:.2f} km au lieu de {s.distance / 1000:.2f})")
+        s.distance = distance
 
 
 def lire_sources(racines, exclus=(), journal=print):
     """Toutes les séances de toutes les racines (dossiers et contenu des ZIP)."""
     seances, comptes, erreurs = [], {}, []
     EMPREINTES_TOMTOM.clear()
+    RESUMES_ZEPP.clear()
     for racine in racines:
         if not racine.is_dir():
             continue
@@ -633,6 +664,9 @@ def lire_sources(racines, exclus=(), journal=print):
             except (ET.ParseError, ValueError, KeyError, TypeError, AttributeError, json.JSONDecodeError,
                     UnicodeDecodeError, zipfile.BadZipFile, OSError) as e:
                 erreurs.append((str(fichier), f"{type(e).__name__}: {e}"[:160]))
+    for s in seances:
+        if s.source == "Zepp":
+            completer_zepp(s)
     copies = {empreinte for empreinte, copie in EMPREINTES_TOMTOM.values() if copie}
     renommees = 0
     for s in seances:
