@@ -58,8 +58,9 @@ Pour les nouvelles activités, Tapiriik (lien en haut de l'interface) peut synch
 | **intervals.icu** | clé d'API (intervals.icu → Settings → Developer Settings) | gratuit ; refuse lui-même les doublons |
 | **Runalyze** | jeton « Personal API » (Réglages, avec date d'expiration) | Runalyze ne publie pas le chemin d'envoi : il est vérifié au premier fichier, et l'outil s'arrête si Runalyze le refuse |
 | **Endurain** | clé d'API (déjà configurée) | Endurain écarte les doublons |
+| **Smashrun** | jeton personnel : https://api.smashrun.com/v1/explorer, tapez `client` en haut puis « Connect », copiez le jeton dans l'interface | course à pied seulement ; les courses déjà présentes dans votre export Smashrun ne sont pas renvoyées ; 250 envois par heure ; le jeton expire au bout de 12 semaines |
 
-Smashrun et Decathlon n'acceptent pas l'envoi de fichiers : reliez-les à Strava ou à Garmin.
+Decathlon n'accepte pas l'envoi de fichiers : reliez-le à Garmin.
 
 Les clés sont vérifiées auprès du service avant d'être enregistrées dans `~/.config/sport/sport.env`, lisible par vous seul.
 Le mode automatique n'envoie que vers les services listés dans `SPORT_AUTO_DESTINATIONS=garmin,intervals` (sport.env) : aucun par défaut.

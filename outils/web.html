@@ -231,6 +231,8 @@ const DESTINATIONS = {
               config: [["RUNALYZE_TOKEN", "Jeton", "password"]] },
   endurain: { titre: "Endurain", aide: "Votre bibliothèque locale. Elle écarte elle-même les doublons.", config: null,
               pasPret: "Clé d'API absente de sport.env." },
+  smashrun: { titre: "Smashrun", aide: "Course à pied seulement. Jeton : api.smashrun.com/v1/explorer, tapez « client » en haut puis Connect ; il expire au bout de 12 semaines.",
+              config: [["SMASHRUN_TOKEN", "Jeton", "password"]] },
 };
 let lues = 0, commandeAffichee = null, enCours = false, commandeEnCours = "";
 

@@ -109,10 +109,12 @@ def etat():
     for nom in sport.DESTINATIONS:
         envois = sport.etat_envois(nom)
         statuts = Counter(v.split(" :")[0] for v in envois.values())
+        acceptes = sport.SPORTS_ACCEPTES.get(nom)  # Smashrun : la course seulement
+        proposees = [l for l in bibliotheque if not acceptes or l["sport"] in acceptes]
         destinations[nom] = {"configuree": destination_configuree(nom, conf), "envoye": statuts.get("envoye", 0),
-                             "deja": statuts.get("deja", 0), "refuse": statuts.get("refuse", 0), "total": len(bibliotheque),
+                             "deja": statuts.get("deja", 0), "refuse": statuts.get("refuse", 0), "total": len(proposees),
                              # activités de la bibliothèque actuelle jamais traitées (le journal garde aussi d'anciens noms)
-                             "restantes": sum(l["fichier"] not in envois for l in bibliotheque)}
+                             "restantes": sum(l["fichier"] not in envois for l in proposees)}
     index = sport.V2 / "index.csv"
     return {
         "bibliotheque": {"total": len(bibliotheque),
@@ -138,14 +140,14 @@ def destination_configuree(nom, conf):
     if nom == "strava":
         return bool(conf.get("STRAVA_CLIENT_ID")) and sport.JETONS_STRAVA.exists()
     return bool(conf.get({"intervals": "INTERVALS_API_KEY", "runalyze": "RUNALYZE_TOKEN",
-                          "endurain": "ENDURAIN_API_KEY"}[nom]))
+                          "endurain": "ENDURAIN_API_KEY", "smashrun": "SMASHRUN_TOKEN"}[nom]))
 
 
 def configurer_destination(nom, champs):
     """Enregistre les identifiants d'une destination après les avoir vérifiés auprès du service."""
     import destinations
 
-    cles = {"intervals": ["INTERVALS_API_KEY"], "runalyze": ["RUNALYZE_TOKEN"],
+    cles = {"intervals": ["INTERVALS_API_KEY"], "runalyze": ["RUNALYZE_TOKEN"], "smashrun": ["SMASHRUN_TOKEN"],
             "strava": ["STRAVA_CLIENT_ID", "STRAVA_CLIENT_SECRET"]}.get(nom)
     if not cles:
         raise ValueError(f"rien à configurer pour {nom}")
@@ -157,7 +159,8 @@ def configurer_destination(nom, champs):
         return {"ok": True, "autoriser": "/strava/autoriser"}
     conf = sport.config()
     conf.update(valeurs)
-    cible = destinations.Intervals(conf) if nom == "intervals" else destinations.Runalyze(conf)
+    cible = {"intervals": destinations.Intervals, "runalyze": destinations.Runalyze,
+             "smashrun": destinations.Smashrun}[nom](conf)
     qui = cible.verifier()  # lève une erreur si le service refuse
     sport.ecrire_config(**valeurs)
     return {"ok": True, "compte": str(qui)}

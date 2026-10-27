@@ -4,7 +4,7 @@
   sport.py preparer     conversion précise de toutes les sources (sources-brutes/, ZIP compris) : une activité
                         par sortie réelle, en FIT, rangée par catégorie dans activites-v2/ (+ contrôle)
   sport.py sante        pas, poids et sommeil de toutes les sources → sante/, Endurain (et les pesées → Garmin)
-  sport.py envoyer <garmin|strava|intervals|runalyze|endurain> [N] [--reessayer]
+  sport.py envoyer <garmin|strava|intervals|runalyze|endurain|smashrun> [N] [--reessayer]
                         envoie N activités de activites-v2/ (100 par défaut), de la plus ancienne à la plus récente
   sport.py lots <destination> [--importes]
                         copie les activités pas encore envoyées en lots à importer à la main sur le site du service
@@ -257,8 +257,11 @@ def connexion_garmin():
     return api
 
 
-DESTINATIONS = ("garmin", "strava", "intervals", "runalyze", "endurain")
-PAUSES = {"garmin": 5, "strava": 10, "intervals": 1, "runalyze": 5, "endurain": 3}  # s entre deux envois
+DESTINATIONS = ("garmin", "strava", "intervals", "runalyze", "endurain", "smashrun")
+PAUSES = {"garmin": 5, "strava": 10, "intervals": 1, "runalyze": 5, "endurain": 3,
+          "smashrun": 15}  # s entre deux envois (Smashrun : 250 requêtes par heure)
+SPORTS_ACCEPTES = {"smashrun": {"running"}}  # les autres activités ne sont pas proposées à ces services
+EXPORT_DU_SERVICE = {"smashrun": "Smashrun"}  # activité lue dans l'export de ce service : elle y est déjà
 
 
 class GarminV2:
@@ -302,6 +305,8 @@ def destination(nom):
         return destinations.Runalyze(conf)
     if nom == "endurain":
         return destinations.Endurain(conf)
+    if nom == "smashrun":
+        return destinations.Smashrun(conf)
     raise ValueError(f"destination inconnue : {nom} (possibles : {', '.join(DESTINATIONS)})")
 
 
@@ -383,11 +388,16 @@ def a_envoyer(nom, reessayer=False):
             if debut:
                 envoyees.append((datetime.fromisoformat(debut), float(duree) * 60 if duree else None, fichier))
     a_faire, doublons = [], []
+    export = EXPORT_DU_SERVICE.get(nom)
     for a in activites:
         if a["fichier"] in etat and not (reessayer and etat[a["fichier"]].startswith("refuse")):
             continue
+        if nom in SPORTS_ACCEPTES and a["sport"] not in SPORTS_ACCEPTES[nom]:
+            continue
         if a["source"] == "Health Sync" and a["enregistreur"] == ORIGINE_SERVICE.get(nom):
             doublons.append((a, f"deja : vient de {a['enregistreur']} (lue par Health Sync)"))
+        elif export and export in {a["source"], *a["autres_sources"].split(", ")}:
+            doublons.append((a, f"deja : présente dans l'export {export}"))
         elif a["fichier"] not in etat and (ancien := deja_envoyee(a, envoyees)):
             doublons.append((a, f"deja : envoyée sous {ancien}"))
         else:

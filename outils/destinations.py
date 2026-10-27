@@ -9,6 +9,7 @@ de chaque fichier : relancer reprend là où l'on s'était arrêté.
 - intervals : intervals.icu (clé d'API personnelle INTERVALS_API_KEY ; refuse lui-même les doublons)
 - runalyze  : Runalyze (jeton « Personal API » RUNALYZE_TOKEN ; chemin d'envoi non publié, vérifié au premier envoi)
 - endurain  : Endurain (clé d'API ENDURAIN_API_KEY, déjà utilisée pour la montre)
+- smashrun  : Smashrun (jeton personnel SMASHRUN_TOKEN, 12 semaines ; course à pied seulement)
 """
 import json
 import time
@@ -201,6 +202,40 @@ class Runalyze:
             if getattr(self, "reussis", 0):
                 raise Limite(f"Runalyze bloque temporairement les envois (403 {str(reponse)[:120]})")
             raise NonConfiguree(f"Runalyze refuse l'envoi avec ce jeton (403 {str(reponse)[:120]})")
+        return f"refuse : {statut} {str(reponse)[:120]}"
+
+
+# ----------------------------------------------------------------------------- Smashrun
+
+class Smashrun:
+    """Jeton personnel : api.smashrun.com/v1/explorer, taper « client » en haut, « Connect », copier le jeton. Il expire
+    au bout de 12 semaines (pas de renouvellement pour ces jetons). 250 requêtes par heure ; course à pied seulement
+    (sport.py ne lui propose que les courses). Le nom du champ du fichier n'est pas publié : « file », vérifié au
+    premier envoi."""
+    nom, titre = "smashrun", "Smashrun"
+    URL = "https://api.smashrun.com/v1"
+
+    def __init__(self, conf):
+        self.jeton = conf.get("SMASHRUN_TOKEN")
+        if not self.jeton:
+            raise NonConfiguree("jeton Smashrun absent (api.smashrun.com/v1/explorer : « client », puis « Connect »)")
+
+    def _entetes(self, **autres):
+        return {"Authorization": f"Bearer {self.jeton}", **autres}
+
+    def verifier(self):
+        statut, reponse = _requete(f"{self.URL}/my/userinfo", entetes=self._entetes())
+        if statut != 200:
+            raise NonConfiguree(f"Smashrun refuse le jeton ({statut}) : il expire au bout de 12 semaines, en recopier un")
+        return (reponse.get("userName") if isinstance(reponse, dict) else None) or "jeton valide"
+
+    def envoyer(self, fichier, activite):
+        corps, type_ = _multipart(fichier)
+        statut, reponse = _requete(f"{self.URL}/my/activities/", "POST", corps, self._entetes(**{"Content-Type": type_}))
+        if statut in (200, 201, 202):
+            return "envoye"  # Smashrun ignore une course de même départ déjà venue d'une autre appli
+        if statut == 401:
+            raise NonConfiguree("Smashrun : jeton expiré (12 semaines), en recopier un depuis api.smashrun.com/v1/explorer")
         return f"refuse : {statut} {str(reponse)[:120]}"
 
 
