@@ -1,0 +1,25 @@
+# Où l'outil trouve vos fichiers et où il range ses résultats. Copier en chemins.yml et adapter.
+# Chemins absolus, ou relatifs au dossier du projet ; « ~ » désigne votre dossier personnel.
+# Sans chemins.yml, tout est cherché et rangé dans le dossier du projet (valeurs ci-dessous).
+#
+# Avec l'interface web (Docker), un dossier situé hors du projet doit aussi être monté dans
+# endurain/docker-compose.yml (section « volumes » du service sport), au même chemin.
+
+# Dossier de vos exports bruts (Google Fit, Runtastic, Samsung Health… ZIP compris), lu en entier
+donnees: .
+
+# Autres dossiers à lire en plus, chacun sous un nom de votre choix
+sources:
+  # zepp: ~/projects/zepp-fit-files
+
+# Résultat de « sport.py preparer » : une activité FIT par sortie
+activites: activites-v2
+
+# Pas, poids et sommeil retenus (CSV)
+sante: sante
+
+# Sauvegarde des fichiers de la montre Garmin
+montre: montre-garmin
+
+# Anciennes versions des activités, jamais effacées par l'outil
+corbeille: a-supprimer

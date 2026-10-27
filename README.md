@@ -8,5 +8,9 @@ Runalyze et Endurain (auto-hébergé), avec une petite interface web.
 
 - `outils/` : l'outil en ligne de commande `sport.py` et son interface web (voir [outils/LISEZ-MOI.md](outils/LISEZ-MOI.md))
 - `endurain/` : `docker-compose.yml` pour Endurain et l'interface web (copier `.env.example` en `.env`)
+- `chemins.exemple.yml` : à copier en `chemins.yml` pour indiquer où sont vos exports et où ranger les résultats
+  (sans ce fichier, tout est dans le dossier du projet)
 
 Les identifiants des services sont rangés dans `~/.config/sport/`, jamais dans le projet.
+
+Licence MIT : voir [LICENSE](LICENSE).

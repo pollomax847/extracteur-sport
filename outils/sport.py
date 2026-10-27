@@ -33,7 +33,27 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 
 PROJET = Path(__file__).resolve().parent.parent
-ARCHIVE = PROJET / "montre-garmin"
+
+
+def lire_chemins():
+    """Emplacements des données, lus dans chemins.yml à la racine du projet (modèle : chemins.exemple.yml).
+    Sans ce fichier, tout est dans le projet. Chemins absolus, ou relatifs au projet ; « ~ » accepté."""
+    fichier = PROJET / "chemins.yml"
+    if not fichier.exists():
+        return {}
+    try:
+        import yaml
+    except ImportError:
+        sys.exit(f"{fichier.name} demande PyYAML : pip install pyyaml")
+    return yaml.safe_load(fichier.read_text()) or {}
+
+
+def chemin(valeur):
+    return PROJET / Path(str(valeur)).expanduser()  # un chemin absolu remplace PROJET
+
+
+CHEMINS = lire_chemins()
+ARCHIVE = chemin(CHEMINS.get("montre", "montre-garmin"))
 ENVOYES = ARCHIVE / ".envoyes.txt"
 CONFIG = Path.home() / ".config" / "sport" / "sport.env"
 DOSSIER_IMPORT = PROJET / "endurain" / "data" / "backend" / "data" / "activity_files" / "bulk_import" / "1"
@@ -42,24 +62,23 @@ JETONS_STRAVA = Path.home() / ".config" / "sport" / "strava.json"
 VENV = Path.home() / ".local" / "share" / "sport" / "venv"
 VERROU = PROJET / "outils" / ".verrou"
 COMMANDES_EXCLUSIVES = {"envoyer", "sante", "auto", "refaire", "preparer"}
-V2 = PROJET / "activites-v2"  # conversion précise : une activité par sortie réelle (sport.py preparer)
-CORBEILLE = PROJET / "a-supprimer"  # anciennes versions de activites-v2 (jamais effacées par l'outil)
-SANTE = PROJET / "sante"  # pas, poids et sommeil retenus, en CSV lisibles
+V2 = chemin(CHEMINS.get("activites", "activites-v2"))  # conversion précise : une activité par sortie réelle (sport.py preparer)
+CORBEILLE = chemin(CHEMINS.get("corbeille", "a-supprimer"))  # anciennes versions de activites-v2 (jamais effacées par l'outil)
+SANTE = chemin(CHEMINS.get("sante", "sante"))  # pas, poids et sommeil retenus, en CSV lisibles
 ETAT_SANTE = PROJET / "outils" / ".sante-endurain.json"  # ce qui a déjà été envoyé à Endurain
 POIDS_GARMIN = PROJET / "outils" / ".poids-garmin.txt"  # pesées créées sur Garmin par l'outil (jour, kg)
 AUTO_GARMIN = 300  # activités envoyées par destination et par passage automatique (SPORT_AUTO_NOMBRE dans sport.env)
 
-# Toutes les sources lues par « inventaire » et « historique ». SPORT_SOURCES=libellé=chemin;… dans sport.env en ajoute d'autres.
-SOURCES = {
-    "projet": PROJET,
-    "zepp-fit-files": Path.home() / "projects" / "zepp-fit-files",
-    "zepp-data": Path.home() / "projects" / "zepp-data",
-}
+# Toutes les sources lues par « inventaire » et « historique » : « donnees » et « sources » de chemins.yml.
+# SPORT_SOURCES=libellé=chemin;… dans sport.env en ajoute d'autres.
+SOURCES = {"projet": chemin(CHEMINS.get("donnees", ".")),
+           **{nom: chemin(dossier) for nom, dossier in (CHEMINS.get("sources") or {}).items()}}
 # Google Drive/sport n'est plus lu par défaut : tout son contenu est déjà copié dans sport/ (inventaire du 25/10/2026 :
 # aucune activité unique) et ce disque NTFS est très lent quand il est occupé. Pour le relire :
 #   sport.py convertir "<disque>/Google Drive/sport"
 # Dans le projet : outils, documentation et la copie de travail d'Endurain ne sont pas des données
-EXCLUS_PROJET = {"endurain", "outils", "scripts", "documentation", "sante", "a-supprimer", "activites-v2", "analyse"}
+EXCLUS_PROJET = {"endurain", "outils", "scripts", "documentation", "sante", "a-supprimer", "activites-v2", "analyse",
+                 SANTE.name, CORBEILLE.name, V2.name}
 
 # Dossiers de la montre qui contiennent vos données. Les autres (Debug, EDM, REMOTESW, TEXT…) sont internes à la montre.
 DOSSIERS_MONTRE = ["Activity", "Monitor", "Sleep", "Summary", "Records", "Totals",
@@ -209,7 +228,7 @@ def utiliser_venv():
         python_venv = VENV / "bin" / "python"
         if python_venv.exists() and Path(sys.executable) != python_venv:
             os.execv(python_venv, [str(python_venv), __file__, *sys.argv[1:]])
-        sys.exit(f"Bibliothèques absentes : python3 -m venv {VENV} && {VENV}/bin/pip install garminconnect garmin-fit-sdk")
+        sys.exit(f"Bibliothèques absentes : python3 -m venv {VENV} && {VENV}/bin/pip install garminconnect garmin-fit-sdk pyyaml")
 
 
 def connexion_garmin():
@@ -705,11 +724,12 @@ def cmd_preparer():
 
     print("Lecture de toutes les sources…", flush=True)
     racines = list(sources().values())
-    toutes = seances.lire_sources(racines, EXCLUS_PROJET | {"activites-v2", "analyse"})
+    seances.DOSSIER_MONTRE = ARCHIVE.name
+    toutes = seances.lire_sources(racines, EXCLUS_PROJET)
     print("Regroupement, choix du meilleur exemplaire, filtres…", flush=True)
     gardees, ecartees = regrouper.preparer(toutes)
     if V2.exists():
-        ancienne = CORBEILLE / time.strftime("%Y-%m-%d_%H%M") / "activites-v2"
+        ancienne = CORBEILLE / time.strftime("%Y-%m-%d_%H%M") / V2.name
         ancienne.parent.mkdir(parents=True, exist_ok=True)
         shutil.move(V2, ancienne)
         print(f"  ancienne version déplacée dans {ancienne}")

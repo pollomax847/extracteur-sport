@@ -13,6 +13,11 @@
 
 Pour ajouter un nouvel export : déposez son dossier ou son ZIP dans `sources-brutes/`, puis lancez « Reconvertir ».
 
+Ces emplacements sont ceux par défaut. Pour les changer, par exemple pour lire vos exports sur un autre disque, copiez
+`chemins.exemple.yml` en `chemins.yml` à la racine du projet et indiquez-y vos dossiers : `donnees` (exports lus en
+entier), `sources` (autres dossiers à lire), `activites`, `sante`, `montre` et `corbeille`. Avec l'interface Docker, un
+dossier hors du projet doit aussi être monté dans `endurain/docker-compose.yml`.
+
 ## Interface : http://localhost:8090
 - **Bibliothèque** : nombre d'activités, part avec GPS, période, répartition par catégorie.
 - **Envoyer vers** : une carte par service, avec sa progression, sa configuration et un bouton d'envoi. Chaque service tient son propre journal (`outils/.envoyes-<service>-v2.txt` : fichier, statut, départ, durée) : un envoi reprend là où il s'était arrêté. Une activité dont le fichier a changé de nom après une reconversion (meilleur exemplaire, heure corrigée) est reconnue par son départ et sa durée et n'est pas renvoyée ; une activité que Health Sync a lue dans Garmin ou Strava n'y est pas renvoyée non plus.
