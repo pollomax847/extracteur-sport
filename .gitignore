@@ -1,0 +1,17 @@
+# Seul le code est publié : tout le reste du dossier (données sportives, exports, santé, journaux) est ignoré
+/*
+!/.gitignore
+!/README.md
+!/outils/
+!/endurain/
+
+/endurain/*
+!/endurain/docker-compose.yml
+!/endurain/.env.example
+!/endurain/LISEZ-MOI.md
+
+# journaux d'envoi, état et historique personnels
+/outils/.*
+!/outils/.gitignore
+/outils/historique-v1/
+__pycache__/

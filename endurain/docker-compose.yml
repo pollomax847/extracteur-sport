@@ -1,0 +1,66 @@
+# Endurain : plateforme sport auto-hébergée (import FIT/TCX/GPX, sync Strava & Garmin Connect)
+# Doc : https://docs.endurain.com
+services:
+  endurain:
+    container_name: endurain-app
+    image: ghcr.io/endurain-project/endurain:v0.20.1
+    env_file:
+      - .env
+    volumes:
+      - ${LOCAL_PATH}/backend/data:/app/backend/data:Z # fichiers d'activités, images
+      - ${LOCAL_PATH}/backend/logs:/app/backend/logs:Z
+    ports:
+      - "127.0.0.1:8080:8080" # accessible uniquement depuis ce PC
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  postgres:
+    image: docker.io/postgres:18@sha256:74935e72241653ca55e0414067e6d8763aceb8a810eb51b452253ec3dcfc4336
+    container_name: endurain-postgres
+    env_file:
+      - .env
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U endurain"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    volumes:
+      # volume Docker nommé : le SSD est en exFAT, PostgreSQL ne peut pas y gérer ses droits
+      - endurain-pgdata:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  # Interface web de outils/sport.py : conversion en FIT, tri, envoi vers Garmin Connect, sauvegarde de la montre
+  sport:
+    container_name: sport-outils
+    build:
+      context: ../outils
+      args:  # chemins de l'ordinateur, définis dans .env (voir .env.example)
+        SPORT_HOME: ${SPORT_HOME}
+        SPORT_PROJET: ${SPORT_PROJET}
+    environment:
+      - ENDURAIN_URL=http://endurain-app:8080  # adresse d'Endurain vue depuis ce conteneur
+      - ENDURAIN_PUBLIC_URL=http://localhost:8080  # lien affiché dans l'interface
+      - SPORT_AUTO_HEURE=non  # suspendu le 25/10 en attendant les choix Strava/pesées ; remettre 04:00 pour le réactiver
+      - TZ=Europe/Paris
+    # Les dossiers sont montés au même chemin que sur l'ordinateur : les chemins des index et journaux restent valables
+    volumes:
+      - ${SPORT_PROJET}:${SPORT_PROJET}
+      - ${SPORT_HOME}/.config/sport:${SPORT_HOME}/.config/sport  # clé d'API Endurain, jetons Garmin
+      - ${SPORT_HOME}/projects:${SPORT_HOME}/projects:ro  # zepp-fit-files, zepp-data
+      # disques USB et montre Garmin, y compris ceux branchés après le démarrage (rslave)
+      - type: bind
+        source: ${SPORT_MEDIA}
+        target: ${SPORT_MEDIA}
+        read_only: true
+        bind:
+          propagation: rslave
+    ports:
+      - "127.0.0.1:8090:8090"
+    depends_on:
+      - endurain
+    restart: unless-stopped
+
+volumes:
+  endurain-pgdata:

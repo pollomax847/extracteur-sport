@@ -1,0 +1,417 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Outils sport</title>
+<style>
+  :root {
+    --fond: #f3f5f8; --carte: #ffffff; --texte: #16202a; --doux: #5d6b78; --bord: #e1e6ec; --accent: #0a66c2;
+    --accent-doux: #e7f0fb; --ok: #1a7f37; --ok-doux: #e6f4ea; --ko: #b42318; --ko-doux: #fdecea; --attente: #9a6700;
+    --attente-doux: #fff4d6; --journal: #0f151b; --journal-texte: #d3dee8; --ombre: 0 1px 2px rgba(16, 24, 40, .06);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --fond: #0f1418; --carte: #171e24; --texte: #e3e9ef; --doux: #95a3b0; --bord: #263039; --accent: #5aa2ec;
+      --accent-doux: #152536; --ok: #4cc26b; --ok-doux: #13261a; --ko: #f07167; --ko-doux: #2c1614; --attente: #e3b341;
+      --attente-doux: #2a2414; --journal: #0a0e12; --ombre: none;
+    }
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  body { margin: 0; font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; background: var(--fond); color: var(--texte); }
+  main { max-width: 1120px; margin: 0 auto; padding: 0 16px 56px; }
+  header { position: sticky; top: 0; z-index: 2; background: color-mix(in srgb, var(--fond) 88%, transparent); backdrop-filter: blur(8px);
+           border-bottom: 1px solid var(--bord); margin-bottom: 20px; }
+  .barre { max-width: 1120px; margin: 0 auto; padding: 12px 16px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+  .barre h1 { font-size: 18px; margin: 0 12px 0 0; letter-spacing: -.01em; }
+  .puces { display: flex; gap: 6px; flex-wrap: wrap; }
+  .puce { font-size: 12.5px; padding: 3px 10px; border-radius: 999px; background: var(--carte); border: 1px solid var(--bord); color: var(--doux); white-space: nowrap; cursor: help; }
+  .puce b { font-weight: 600; }
+  .puce.ok b { color: var(--ok); } .puce.ko b { color: var(--ko); } .puce.attente b { color: var(--attente); }
+  .barre a { margin-left: auto; color: var(--accent); text-decoration: none; font-weight: 500; font-size: 14px; }
+  h2 { font-size: 15px; margin: 0; }
+  .titre-section { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--doux); margin: 28px 0 10px; }
+  /* toutes les cartes d'une rangée ont la même hauteur ; leurs boutons sont alignés en bas */
+  .grille { display: grid; gap: 14px; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); align-items: stretch; }
+  .carte { background: var(--carte); border: 1px solid var(--bord); border-radius: 12px; padding: 16px; box-shadow: var(--ombre);
+           display: flex; flex-direction: column; min-width: 0; }
+  .carte .bas { margin-top: auto; padding-top: 12px; }
+  .chiffres { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 12px; }
+  .chiffre { background: var(--carte); border: 1px solid var(--bord); border-radius: 12px; padding: 12px 14px; box-shadow: var(--ombre); }
+  .chiffre b { display: block; font-size: 24px; font-variant-numeric: tabular-nums; letter-spacing: -.02em; white-space: nowrap; }
+  .chiffre span { font-size: 12.5px; color: var(--doux); }
+  .chiffre.petit b { font-size: 17px; line-height: 36px; }
+  .aide { color: var(--doux); font-size: 13px; margin: 6px 0 0; }
+  .entete-carte { display: flex; align-items: center; justify-content: space-between; gap: 4px 8px; flex-wrap: wrap; }
+  .entete-carte h2 { white-space: nowrap; }
+  .etiquette { font-size: 12px; padding: 2px 8px; border-radius: 999px; font-weight: 500; white-space: nowrap; }
+  .etiquette.ok { background: var(--ok-doux); color: var(--ok); } .etiquette.ko { background: var(--ko-doux); color: var(--ko); }
+  .etiquette.attente { background: var(--attente-doux); color: var(--attente); }
+  .etiquette.neutre { background: var(--accent-doux); color: var(--accent); }
+  .progression { height: 6px; background: var(--bord); border-radius: 99px; overflow: hidden; margin: 14px 0 8px; }
+  .progression div { height: 100%; background: var(--accent); width: 0; transition: width .4s; }
+  .progression.fini div { background: var(--ok); }
+  .compteurs { display: grid; grid-template-columns: 1fr auto; gap: 2px 12px; margin: 0; font-size: 13px; font-variant-numeric: tabular-nums; }
+  .compteurs dt { color: var(--doux); } .compteurs dd { margin: 0; text-align: right; font-weight: 600; }
+  .compteurs .ko { color: var(--ko); }
+  label { display: block; font-size: 12.5px; color: var(--doux); margin: 8px 0 4px; }
+  input[type=text], input[type=number], input[type=email], input[type=password] {
+    width: 100%; padding: 8px 10px; border: 1px solid var(--bord); border-radius: 8px; background: var(--fond); color: var(--texte); font: inherit; }
+  input:focus { outline: 2px solid var(--accent-doux); border-color: var(--accent); }
+  .case { display: flex; align-items: center; gap: 6px; color: var(--texte); font-size: 13.5px; margin: 8px 0 0; }
+  .rangee { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .rangee + .rangee { margin-top: 8px; }
+  .envoi { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: end; }
+  .envoi label { margin-top: 0; }
+  button { padding: 8px 14px; border: 0; border-radius: 8px; background: var(--accent); color: #fff; font: inherit; font-weight: 500; cursor: pointer; }
+  button.second { background: transparent; color: var(--accent); border: 1px solid var(--bord); }
+  button:hover:not(:disabled) { filter: brightness(1.08); }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  details { margin-top: 10px; } summary { cursor: pointer; color: var(--accent); font-size: 13.5px; }
+  .categories { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .categories span { font-size: 12.5px; background: var(--accent-doux); color: var(--accent); padding: 3px 9px; border-radius: 999px; }
+  .bandeau { display: flex; gap: 10px; align-items: center; background: var(--attente-doux); color: var(--attente); border-radius: 10px;
+             padding: 10px 14px; font-size: 13.5px; margin-bottom: 4px; }
+  pre { background: var(--journal); color: var(--journal-texte); border-radius: 10px; padding: 12px; height: 320px; overflow: auto;
+        white-space: pre-wrap; word-break: break-word; font: 12.5px/1.45 ui-monospace, "SFMono-Regular", monospace; margin: 12px 0 0; }
+  .avancement { font-size: 12.5px; color: var(--doux); font-variant-numeric: tabular-nums; }
+  #message { min-height: 20px; margin: 10px 0 0; font-size: 14px; }
+  .ok { color: var(--ok); } .ko { color: var(--ko); }
+  a { color: var(--accent); }
+  @media (max-width: 600px) { .barre a { margin-left: 0; } .chiffre b { font-size: 20px; } }
+</style>
+</head>
+<body>
+<header>
+  <div class="barre">
+    <h1>Outils sport</h1>
+    <div class="puces">
+      <span class="puce" id="p-montre" title="Montre Garmin branchée en USB">Montre <b>…</b></span>
+      <span class="puce" id="p-endurain" title="Endurain, votre bibliothèque locale (port 8080)">Endurain <b>…</b></span>
+      <span class="puce" id="p-auto" title="« Tout faire » lancé chaque nuit (SPORT_AUTO_HEURE dans docker-compose.yml)">Passage de nuit <b>…</b></span>
+      <span class="puce" id="p-tache" title="Une seule commande à la fois">Commande <b>aucune</b></span>
+    </div>
+    <a id="lien-endurain" href="http://localhost:8080" target="_blank" rel="noopener">Ouvrir Endurain ↗</a>
+  </div>
+</header>
+
+<main>
+  <div class="bandeau" id="bandeau" hidden>
+    <span>⏳</span><span id="bandeau-texte"></span>
+  </div>
+
+  <div class="titre-section">Bibliothèque : une activité par sortie réelle (activites-v2)</div>
+  <div class="chiffres">
+    <div class="chiffre"><b id="c-total">–</b><span>activités</span></div>
+    <div class="chiffre"><b id="c-gps">–</b><span id="c-gps-part">avec trace GPS</span></div>
+    <div class="chiffre"><b id="c-annees">–</b><span>période couverte</span></div>
+    <div class="chiffre petit"><b id="c-conversion">–</b><span>dernière conversion</span></div>
+  </div>
+  <div class="carte" style="margin-top:12px">
+    <h2>Par catégorie</h2>
+    <div class="categories" id="categories"></div>
+  </div>
+
+  <div class="titre-section">Envoyer vers les services</div>
+  <div class="grille" id="destinations"></div>
+
+  <div class="titre-section">Données</div>
+  <div class="grille">
+    <section class="carte">
+      <h2>Reconvertir</h2>
+      <p class="aide">Relit toutes les sources (ZIP compris), regroupe chaque sortie vue par plusieurs applis, garde le meilleur exemplaire et refait activites-v2. L'ancienne version va dans a-supprimer/. Environ 10 min.</p>
+      <div class="bas"><button data-commande="preparer">Reconvertir</button></div>
+    </section>
+    <section class="carte">
+      <h2>Santé</h2>
+      <p class="aide">Pas, poids et sommeil de toutes les sources, une valeur par jour, vers sante/ et Endurain. Les pesées partent aussi vers Garmin.</p>
+      <div class="bas"><button class="second" data-commande="sante">Mettre à jour la santé</button></div>
+    </section>
+    <section class="carte">
+      <h2>Montre et « Tout faire »</h2>
+      <p class="aide">Sauvegarde la montre branchée. « Tout faire » enchaîne montre, conversion, santé, puis les envois listés dans SPORT_AUTO_DESTINATIONS (aucun par défaut).</p>
+      <div class="bas rangee">
+        <button class="second" data-commande="montre">Sauvegarder la montre</button>
+        <button data-commande="auto">Tout faire</button>
+      </div>
+    </section>
+  </div>
+
+  <div class="titre-section">Comptes</div>
+  <div class="grille">
+    <section class="carte">
+      <div class="entete-carte"><h2>Garmin Connect</h2><span class="etiquette" id="e-garmin"></span></div>
+      <p class="aide">Seuls les jetons de connexion sont gardés, pas le mot de passe.</p>
+      <details id="d-garmin" class="bas">
+        <summary id="s-garmin">Se connecter</summary>
+        <form id="form-connexion">
+          <label for="email">E-mail</label><input id="email" type="email" autocomplete="username" required>
+          <label for="mdp">Mot de passe</label><input id="mdp" type="password" autocomplete="current-password" required>
+          <div class="rangee" style="margin-top:10px"><button type="submit">Se connecter</button></div>
+        </form>
+        <form id="form-mfa" hidden>
+          <label for="mfa">Code reçu par Garmin (MFA)</label><input id="mfa" type="text" inputmode="numeric" autocomplete="one-time-code" required>
+          <div class="rangee" style="margin-top:10px"><button type="submit">Valider</button></div>
+        </form>
+      </details>
+    </section>
+    <section class="carte">
+      <div class="entete-carte"><h2>Compte Endurain</h2><span class="etiquette" id="e-endurain"></span></div>
+      <p class="aide">Pour envoyer la santé et importer automatiquement. Gardé dans sport.env, lisible par vous seul.</p>
+      <details id="d-endurain" class="bas">
+        <summary id="s-endurain">Enregistrer le compte</summary>
+        <form id="form-endurain">
+          <label for="e-utilisateur">Utilisateur</label><input id="e-utilisateur" type="text" value="admin" autocomplete="username" required>
+          <label for="e-mdp">Mot de passe</label><input id="e-mdp" type="password" autocomplete="current-password" required>
+          <div class="rangee" style="margin-top:10px"><button type="submit">Enregistrer</button></div>
+        </form>
+      </details>
+    </section>
+  </div>
+
+  <div class="titre-section">Journal de la commande</div>
+  <section class="carte">
+    <div class="entete-carte">
+      <h2 id="titre-journal">Aucune commande lancée</h2>
+      <button class="second" id="arreter" hidden>Arrêter</button>
+    </div>
+    <div id="bloc-avancement" hidden>
+      <div class="progression" id="barre-tache"><div></div></div>
+      <div class="avancement" id="avancement"></div>
+    </div>
+    <pre id="journal"></pre>
+    <p id="message"></p>
+  </section>
+</main>
+
+<template id="modele-destination">
+  <section class="carte">
+    <div class="entete-carte"><h2 class="d-titre"></h2><span class="etiquette d-etat"></span></div>
+    <p class="aide d-aide"></p>
+    <div class="progression d-progression"><div class="d-barre"></div></div>
+    <dl class="compteurs">
+      <dt>Sur le service</dt><dd class="d-faites"></dd>
+      <dt>dont déjà présentes</dt><dd class="d-deja"></dd>
+      <dt>Restant à envoyer</dt><dd class="d-restantes"></dd>
+      <dt>Refusées</dt><dd class="d-refusees"></dd>
+    </dl>
+    <div class="bas">
+      <div class="envoi d-envoi">
+        <div><label>Combien en envoyer</label><input type="number" class="d-nombre" min="1" value="100"></div>
+        <button class="d-envoyer">Envoyer</button>
+      </div>
+      <label class="case d-case-reessayer" hidden><input type="checkbox" class="d-reessayer"> Retenter aussi les refusées</label>
+      <p class="aide d-pas-pret" hidden></p>
+      <details class="d-config" hidden><summary>Configurer</summary><form class="d-form"></form></details>
+    </div>
+  </section>
+</template>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const nombre = (n) => (n ?? 0).toLocaleString("fr-FR");
+const NOMS_CATEGORIES = {
+  "marche": "Marche", "course": "Course", "course-tapis": "Course sur tapis", "course-trail": "Trail", "randonnee": "Randonnée",
+  "velo": "Vélo", "velo-interieur": "Vélo d'intérieur", "natation-piscine": "Natation en piscine",
+  "natation-eau-libre": "Natation en eau libre", "musculation": "Musculation", "appareils": "Appareils", "autres": "Autres",
+};
+const DESTINATIONS = {
+  garmin: { titre: "Garmin Connect", aide: "Coupez la liaison Strava dans Garmin pendant l'envoi de l'historique : sinon Strava reçoit tout aussi.",
+            config: null, pasPret: "Connectez-vous dans « Comptes » plus bas." },
+  strava: { titre: "Strava", aide: "Créez une application sur strava.com/settings/api (domaine de rappel : localhost), puis configurez-la ici.",
+            config: [["STRAVA_CLIENT_ID", "Client ID", "text"], ["STRAVA_CLIENT_SECRET", "Client Secret", "password"]] },
+  intervals: { titre: "intervals.icu", aide: "Gratuit ; refuse lui-même les doublons. Clé dans Settings → Developer Settings.",
+               config: [["INTERVALS_API_KEY", "Clé d'API", "password"]] },
+  runalyze: { titre: "Runalyze", aide: "Jeton « Personal API » (Réglages). Le chemin d'envoi est vérifié au premier fichier.",
+              config: [["RUNALYZE_TOKEN", "Jeton", "password"]] },
+  endurain: { titre: "Endurain", aide: "Votre bibliothèque locale. Elle écarte elle-même les doublons.", config: null,
+              pasPret: "Clé d'API absente de sport.env." },
+};
+let lues = 0, commandeAffichee = null, enCours = false, commandeEnCours = "";
+
+async function api(chemin, donnees) {
+  const r = await fetch(chemin, donnees === undefined ? {} :
+    { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(donnees) });
+  const corps = await r.json();
+  if (!r.ok) throw new Error(corps.erreur || r.statusText);
+  return corps;
+}
+
+function message(texte, erreur) { $("message").textContent = texte; $("message").className = erreur ? "ko" : "ok"; }
+
+function puce(id, classe, texte) { const p = $(id); p.className = `puce ${classe}`; p.querySelector("b").textContent = texte; }
+
+function etiquette(el, classe, texte) { el.className = `etiquette ${el.classList.contains("d-etat") ? "d-etat " : ""}${classe}`; el.textContent = texte; }
+
+function lancer(donnees) {
+  return api("/api/lancer", donnees).then(() => { message(""); rafraichirJournal(); }).catch((err) => message(err.message, true));
+}
+
+function construireDestinations() {
+  for (const [nom, d] of Object.entries(DESTINATIONS)) {
+    const carte = $("modele-destination").content.firstElementChild.cloneNode(true);
+    carte.id = `d-${nom}`;
+    carte.querySelector(".d-titre").textContent = d.titre;
+    carte.querySelector(".d-aide").textContent = d.aide;
+    const champ = carte.querySelector(".d-nombre");
+    champ.id = `${nom}-nombre`;
+    carte.querySelector(".d-envoi label").htmlFor = champ.id;
+    champ.addEventListener("input", () => (champ.dataset.touche = "1"));
+    carte.querySelector(".d-reessayer").addEventListener("change", rafraichirEtat);
+    carte.querySelector(".d-envoyer").addEventListener("click", () => lancer({
+      commande: "envoyer", destination: nom, nombre: champ.value, reessayer: carte.querySelector(".d-reessayer").checked }));
+    if (d.config) {
+      const form = carte.querySelector(".d-form");
+      for (const [cle, libelle, type] of d.config) {
+        form.insertAdjacentHTML("beforeend", `<label for="${nom}-${cle}">${libelle}</label><input id="${nom}-${cle}" name="${cle}" type="${type}" autocomplete="off" required>`);
+      }
+      form.insertAdjacentHTML("beforeend", `<div class="rangee" style="margin-top:10px"><button type="submit">${nom === "strava" ? "Enregistrer et autoriser" : "Vérifier et enregistrer"}</button></div>`);
+      form.addEventListener("submit", async (ev) => {
+        ev.preventDefault();
+        try {
+          const r = await api("/api/destination", { nom, champs: Object.fromEntries(new FormData(form)) });
+          form.reset();
+          if (r.autoriser) { window.location.href = r.autoriser; return; }
+          message(`${d.titre} : connecté (${r.compte}).`); rafraichirEtat();
+        } catch (err) { message(`${d.titre} : ${err.message}`, true); }
+      });
+      carte.querySelector(".d-config").hidden = false;
+    }
+    $("destinations").append(carte);
+  }
+}
+
+function majDestination(nom, d) {
+  const carte = $(`d-${nom}`); if (!carte) return;
+  const restantes = d.restantes ?? Math.max(0, d.total - d.envoye - d.deja);
+  const faites = d.total - restantes;
+  const envoiEnCours = enCours && commandeEnCours.startsWith(`envoyer ${nom} `);
+  const etat = carte.querySelector(".d-etat");
+  if (envoiEnCours) etiquette(etat, "attente", "envoi en cours");
+  else if (!d.configuree) etiquette(etat, "ko", "à configurer");
+  else if (d.total && !restantes) etiquette(etat, "ok", "tout est envoyé");
+  else etiquette(etat, "neutre", `${nombre(restantes)} à envoyer`);
+  carte.querySelector(".d-progression").classList.toggle("fini", d.total > 0 && !restantes);
+  carte.querySelector(".d-barre").style.width = d.total ? `${Math.min(100, 100 * faites / d.total)}%` : "0";
+  carte.querySelector(".d-faites").textContent = `${nombre(faites)} / ${nombre(d.total)}`;
+  carte.querySelector(".d-deja").textContent = nombre(d.deja);
+  carte.querySelector(".d-restantes").textContent = nombre(restantes);
+  const refusees = carte.querySelector(".d-refusees");
+  refusees.textContent = nombre(d.refuse); refusees.classList.toggle("ko", d.refuse > 0);
+  carte.querySelector(".d-case-reessayer").hidden = !d.refuse;
+  // pas prêt : on explique quoi faire au lieu d'un bouton grisé
+  carte.querySelector(".d-envoi").hidden = !d.configuree;
+  const pasPret = carte.querySelector(".d-pas-pret");
+  pasPret.hidden = d.configuree || !DESTINATIONS[nom].pasPret;
+  pasPret.textContent = DESTINATIONS[nom].pasPret || "";
+  carte.querySelector(".d-config").open = !d.configuree && carte.querySelector(".d-config").open;
+  const champ = carte.querySelector(".d-nombre");
+  if (!champ.dataset.touche) champ.value = Math.max(1, Math.min(100, restantes || d.refuse || 100));
+  const bouton = carte.querySelector(".d-envoyer");
+  bouton.disabled = enCours || !d.configuree || (!restantes && !(d.refuse && carte.querySelector(".d-reessayer").checked));
+  bouton.title = enCours ? "Une commande est déjà en cours" : !restantes ? "Rien de nouveau à envoyer" : "";
+}
+
+async function rafraichirEtat() {
+  try {
+    const e = await api("/api/etat");
+    puce("p-montre", e.montre ? "ok" : "", e.montre ? "branchée" : "non branchée");
+    puce("p-endurain", e.endurain ? "ok" : "ko", e.endurain ? (e.endurain_identifiants ? "en marche" : "compte à enregistrer") : "ne répond pas");
+    puce("p-auto", e.prochain_auto ? "ok" : "attente", e.prochain_auto ? `le ${e.prochain_auto}` : "suspendu");
+    $("lien-endurain").href = e.endurain_url;
+    const b = e.bibliotheque;
+    $("c-total").textContent = nombre(b.total);
+    $("c-gps").textContent = nombre(b.gps);
+    $("c-gps-part").textContent = b.total ? `avec trace GPS (${Math.round(100 * b.gps / b.total)} %)` : "avec trace GPS";
+    $("c-annees").textContent = b.annees ? `${b.annees[0]} – ${b.annees[1]}` : "–";
+    $("c-conversion").textContent = b.convertie_le || "–";
+    $("categories").replaceChildren(...Object.entries(b.categories).map(([c, n]) => {
+      const s = document.createElement("span"); s.textContent = `${NOMS_CATEGORIES[c] || c} · ${nombre(n)}`; return s;
+    }));
+    for (const [nom, d] of Object.entries(e.destinations)) majDestination(nom, d);
+    compte("garmin", e.garmin_connecte, "Changer de compte", "Se connecter");
+    compte("endurain", e.endurain_identifiants, "Changer le mot de passe", "Enregistrer le compte");
+  } catch (err) { /* serveur en redémarrage */ }
+}
+
+function compte(nom, connecte, changer, connecter) {
+  etiquette($(`e-${nom}`), connecte ? "ok" : "ko", connecte ? "connecté" : "non connecté");
+  $(`s-${nom}`).textContent = connecte ? changer : connecter;
+  if (!connecte && !$(`d-${nom}`).dataset.vu) { $(`d-${nom}`).open = true; $(`d-${nom}`).dataset.vu = "1"; }
+}
+
+async function rafraichirJournal() {
+  try {
+    const j = await api(`/api/journal?depuis=${lues}`);
+    if (j.commande !== commandeAffichee) { $("journal").textContent = ""; lues = 0; commandeAffichee = j.commande; return; }
+    if (j.lignes.length) {
+      const pre = $("journal"), enBas = pre.scrollHeight - pre.scrollTop - pre.clientHeight < 30;
+      pre.textContent += j.lignes.join("\n") + "\n";
+      lues = j.total;
+      if (enBas) pre.scrollTop = pre.scrollHeight;
+      const derniere = [...j.lignes].reverse().map((l) => l.match(/(\d+)\/(\d+)(?: \((\d{4}-\d\d-\d\d)\))?/)).find(Boolean);
+      if (derniere) {
+        $("bloc-avancement").hidden = false;
+        $("barre-tache").firstElementChild.style.width = `${100 * derniere[1] / derniere[2]}%`;
+        $("avancement").textContent = `${nombre(+derniere[1])} sur ${nombre(+derniere[2])}` +
+          (derniere[3] ? ` — activités jusqu'au ${new Date(derniere[3]).toLocaleDateString("fr-FR")}` : "");
+      }
+    }
+    const etaitEnCours = enCours;
+    enCours = j.en_cours; commandeEnCours = j.en_cours ? j.commande : "";
+    $("titre-journal").textContent = j.commande ? `sport.py ${j.commande}` + (j.en_cours ? " — en cours" : j.code === 0 ? " — terminé" : ` — arrêté (code ${j.code})`) : "Aucune commande lancée";
+    puce("p-tache", j.en_cours ? "attente" : "", j.en_cours ? j.commande.split(" ").slice(0, 2).join(" ") : "aucune");
+    $("arreter").hidden = !j.en_cours;
+    if (!j.en_cours) $("bloc-avancement").hidden = true;
+    $("bandeau").hidden = !j.en_cours;
+    $("bandeau-texte").textContent = j.en_cours
+      ? `« sport.py ${j.commande} » est en cours : les autres boutons sont bloqués jusqu'à la fin (suivi dans le journal en bas).` : "";
+    document.querySelectorAll("button[data-commande]").forEach((b) => {
+      b.disabled = j.en_cours; b.title = j.en_cours ? "Une commande est déjà en cours" : "";
+    });
+    if (etaitEnCours !== enCours) rafraichirEtat();
+  } catch (err) { /* idem */ }
+}
+
+document.querySelectorAll("button[data-commande]").forEach((bouton) =>
+  bouton.addEventListener("click", () => lancer({ commande: bouton.dataset.commande })));
+$("arreter").addEventListener("click", () => api("/api/arreter", {}).catch((err) => message(err.message, true)));
+
+$("form-connexion").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  try {
+    const r = await api("/api/garmin/connexion", { email: $("email").value, mot_de_passe: $("mdp").value });
+    $("mdp").value = "";
+    if (r.mfa) { $("form-connexion").hidden = true; $("form-mfa").hidden = false; $("mfa").focus(); message("Garmin a envoyé un code de vérification."); }
+    else { message("Connecté à Garmin Connect."); $("d-garmin").open = false; rafraichirEtat(); }
+  } catch (err) { message(`Connexion refusée : ${err.message}`, true); }
+});
+$("form-mfa").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  try {
+    await api("/api/garmin/mfa", { code: $("mfa").value.trim() });
+    $("form-mfa").hidden = true; $("form-connexion").hidden = false; $("mfa").value = ""; $("d-garmin").open = false;
+    message("Connecté à Garmin Connect."); rafraichirEtat();
+  } catch (err) { message(`Code refusé : ${err.message}`, true); }
+});
+$("form-endurain").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  try {
+    await api("/api/endurain/identifiants", { utilisateur: $("e-utilisateur").value, mot_de_passe: $("e-mdp").value });
+    $("e-mdp").value = ""; $("d-endurain").open = false; message("Compte Endurain enregistré."); rafraichirEtat();
+  } catch (err) { message(`Endurain refuse ces identifiants : ${err.message}`, true); }
+});
+
+const retourStrava = new URLSearchParams(location.search).get("strava");
+if (retourStrava) {
+  message(retourStrava === "ok" ? "Strava autorisé." : `Strava : ${retourStrava}`, retourStrava !== "ok");
+  history.replaceState(null, "", "/");
+}
+construireDestinations();
+rafraichirJournal().then(rafraichirEtat);
+setInterval(rafraichirJournal, 1000);
+setInterval(rafraichirEtat, 5000);
+</script>
+</body>
+</html>
