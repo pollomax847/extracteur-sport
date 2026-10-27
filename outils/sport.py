@@ -261,6 +261,13 @@ DESTINATIONS = ("garmin", "strava", "intervals", "runalyze", "endurain", "smashr
 PAUSES = {"garmin": 5, "strava": 10, "intervals": 1, "runalyze": 5, "endurain": 3,
           "smashrun": 15}  # s entre deux envois (Smashrun : 250 requêtes par heure)
 SPORTS_ACCEPTES = {"smashrun": {"running"}}  # les autres activités ne sont pas proposées à ces services
+DISTANCE_EXIGEE = {"smashrun"}  # une activité sans distance n'est pas proposée à ces services
+
+
+def proposee(nom, a):
+    """L'activité (ligne de index.csv) peut-elle aller vers ce service ?"""
+    return ((nom not in SPORTS_ACCEPTES or a["sport"] in SPORTS_ACCEPTES[nom])
+            and (nom not in DISTANCE_EXIGEE or bool(a["distance_km"])))
 EXPORT_DU_SERVICE = {"smashrun": "Smashrun"}  # activité lue dans l'export de ce service : elle y est déjà
 
 
@@ -392,7 +399,7 @@ def a_envoyer(nom, reessayer=False):
     for a in activites:
         if a["fichier"] in etat and not (reessayer and etat[a["fichier"]].startswith("refuse")):
             continue
-        if nom in SPORTS_ACCEPTES and a["sport"] not in SPORTS_ACCEPTES[nom]:
+        if not proposee(nom, a):
             continue
         if a["source"] == "Health Sync" and a["enregistreur"] == ORIGINE_SERVICE.get(nom):
             doublons.append((a, f"deja : vient de {a['enregistreur']} (lue par Health Sync)"))
@@ -411,20 +418,45 @@ def a_envoyer(nom, reessayer=False):
     return activites, etat, a_faire
 
 
+DECALAGES_SERVICE = (0, 3600, -3600, 7200, -7200)  # imports Smashrun ou Runtastic décalés d'1 ou 2 h (certaines séances)
+
+
+def sans_les_presentes(nom, a_faire, presentes):
+    """Retire les activités déjà sur le service (même départ à 3 min près, éventuellement décalé d'1 ou 2 h, et durée
+    à 15 % près) et les note « deja » dans le journal."""
+    reste = []
+    with journal_envois(nom).open("a") as journal:
+        for a in a_faire:
+            debut, duree = datetime.fromisoformat(a["debut_utc"]), float(a["duree_min"]) * 60
+            if any(any(abs((d - debut).total_seconds() - dec) <= 180 for dec in DECALAGES_SERVICE)
+                   and abs(du - duree) <= 0.15 * max(du, duree) + 60 for d, du in presentes):
+                journal.write(f"{a['fichier']}\tdeja : déjà sur le compte\t{a['debut_utc']}\t{a['duree_min']}\n")
+            else:
+                reste.append(a)
+    if len(reste) < len(a_faire):
+        print(f"  {len(a_faire) - len(reste)} activité(s) déjà sur le compte, notées « deja »")
+    return reste
+
+
 def envoyer_v2(nom, limite, reessayer=False):
     """Envoie au plus « limite » activités de activites-v2/ vers une destination (voir a_envoyer)."""
     import destinations
 
     activites, etat, a_faire = a_envoyer(nom, reessayer)
-    a_faire = a_faire[:limite]
-    print(f"{nom} : {len(activites)} activités, {len(etat)} déjà traitées, {len(a_faire)} à envoyer maintenant")
     if not a_faire:
+        print(f"{nom} : {len(activites)} activités, {len(etat)} déjà traitées, rien à envoyer")
         return Counter()
     try:
         cible = destination(nom)
         print(f"  {cible.titre} : {cible.verifier()}")
+        if hasattr(cible, "presentes"):  # le service dit ce qu'il a déjà, d'où qu'il vienne
+            a_faire = sans_les_presentes(nom, a_faire, cible.presentes())
     except destinations.NonConfiguree as e:
         print(f"  {nom} : {e}")
+        return Counter()
+    a_faire = a_faire[:limite]
+    print(f"{nom} : {len(activites)} activités, {len(etat_envois(nom))} déjà traitées, {len(a_faire)} à envoyer maintenant")
+    if not a_faire:
         return Counter()
     compte = Counter()
     with journal_envois(nom).open("a") as journal:

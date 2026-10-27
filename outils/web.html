@@ -231,8 +231,8 @@ const DESTINATIONS = {
               config: [["RUNALYZE_TOKEN", "Jeton", "password"]] },
   endurain: { titre: "Endurain", aide: "Votre bibliothèque locale. Elle écarte elle-même les doublons.", config: null,
               pasPret: "Clé d'API absente de sport.env." },
-  smashrun: { titre: "Smashrun", aide: "Course à pied seulement. Jeton : api.smashrun.com/v1/explorer, tapez « client » en haut puis Connect ; il expire au bout de 12 semaines.",
-              config: [["SMASHRUN_TOKEN", "Jeton", "password"]] },
+  smashrun: { titre: "Smashrun", aide: "Course à pied seulement. « Autoriser » récupère le jeton ; il expire au bout de 12 semaines, il suffit alors de recliquer.",
+              autoriser: "/smashrun/autoriser", config: [["SMASHRUN_TOKEN", "ou collez un jeton", "password"]] },
 };
 let lues = 0, commandeAffichee = null, enCours = false, commandeEnCours = "";
 
@@ -269,6 +269,10 @@ function construireDestinations() {
       commande: "envoyer", destination: nom, nombre: champ.value, reessayer: carte.querySelector(".d-reessayer").checked }));
     if (d.config) {
       const form = carte.querySelector(".d-form");
+      if (d.autoriser) {
+        form.insertAdjacentHTML("beforeend", `<div class="rangee" style="margin-bottom:10px"><button type="button" class="d-autoriser">Autoriser ${d.titre}</button></div>`);
+        form.querySelector(".d-autoriser").addEventListener("click", () => (window.location.href = d.autoriser));
+      }
       for (const [cle, libelle, type] of d.config) {
         form.insertAdjacentHTML("beforeend", `<label for="${nom}-${cle}">${libelle}</label><input id="${nom}-${cle}" name="${cle}" type="${type}" autocomplete="off" required>`);
       }
@@ -409,9 +413,10 @@ $("form-endurain").addEventListener("submit", async (ev) => {
   } catch (err) { message(`Endurain refuse ces identifiants : ${err.message}`, true); }
 });
 
-const retourStrava = new URLSearchParams(location.search).get("strava");
-if (retourStrava) {
-  message(retourStrava === "ok" ? "Strava autorisé." : `Strava : ${retourStrava}`, retourStrava !== "ok");
+for (const [cle, titre] of [["strava", "Strava"], ["smashrun", "Smashrun"]]) {  // retour d'une autorisation
+  const retour = new URLSearchParams(location.search).get(cle);
+  if (!retour) continue;
+  message(retour === "ok" ? `${titre} autorisé.` : `${titre} : ${retour}`, retour !== "ok");
   history.replaceState(null, "", "/");
 }
 construireDestinations();

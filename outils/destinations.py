@@ -17,7 +17,9 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 NAVIGATEUR = "Mozilla/5.0 (X11; Linux x86_64) sport.py"  # intervals.icu filtre les clients sans user-agent
 
@@ -210,10 +212,19 @@ class Runalyze:
 class Smashrun:
     """Jeton personnel : api.smashrun.com/v1/explorer, taper « client » en haut, « Connect », copier le jeton. Il expire
     au bout de 12 semaines (pas de renouvellement pour ces jetons). 250 requêtes par heure ; course à pied seulement
-    (sport.py ne lui propose que les courses). Le nom du champ du fichier n'est pas publié : « file », vérifié au
-    premier envoi."""
+    (sport.py ne lui propose que les courses). Une course avec trace part en FIT (champ « file », vérifié le
+    27/10/2026) ; sans trace, Smashrun refuse le FIT (« no data to import ») : elle part en JSON (départ, durée,
+    distance), à l'heure de Paris faute de mieux. Sans distance, Smashrun ne l'accepte pas."""
     nom, titre = "smashrun", "Smashrun"
     URL = "https://api.smashrun.com/v1"
+
+    @staticmethod
+    def lien_autorisation(retour):
+        """Connexion Smashrun avec le client public « client » (flux implicite) : le jeton revient dans le fragment de
+        l'adresse de retour (#access_token=…), lu par la page de retour de l'interface."""
+        return "https://secure.smashrun.com/oauth2/authenticate?" + urllib.parse.urlencode({
+            "client_id": "client", "scope": "read_activity write_activity", "response_type": "token",
+            "state": uuid.uuid4().hex, "redirect_uri": retour}, quote_via=urllib.parse.quote)
 
     def __init__(self, conf):
         self.jeton = conf.get("SMASHRUN_TOKEN")
@@ -229,11 +240,28 @@ class Smashrun:
             raise NonConfiguree(f"Smashrun refuse le jeton ({statut}) : il expire au bout de 12 semaines, en recopier un")
         return (reponse.get("userName") if isinstance(reponse, dict) else None) or "jeton valide"
 
+    def presentes(self):
+        """[(départ UTC, durée s)] des courses déjà sur le compte, quelle que soit l'appli qui les y a mises (Garmin,
+        Strava… : 567 courses le 27/10/2026, dont 209 que sport.py aurait renvoyées en double)."""
+        statut, liste = _requete(f"{self.URL}/my/activities/search", entetes=self._entetes())
+        if statut != 200 or not isinstance(liste, list):
+            raise NonConfiguree(f"Smashrun : liste des courses illisible ({statut})")
+        return [(datetime.fromisoformat(a["startDateTimeLocal"]).astimezone(timezone.utc), float(a.get("duration") or 0))
+                for a in liste if a.get("startDateTimeLocal")]
+
     def envoyer(self, fichier, activite):
-        corps, type_ = _multipart(fichier)
+        if activite.get("trace") == "True":
+            corps, type_ = _multipart(fichier)
+        else:
+            debut = datetime.fromisoformat(activite["debut_utc"]).astimezone(ZoneInfo("Europe/Paris"))
+            corps, type_ = json.dumps({
+                "externalId": activite["fichier"], "activityType": "running",
+                "startDateTimeLocal": debut.isoformat(timespec="seconds"),
+                "distance": float(activite["distance_km"]), "duration": round(float(activite["duree_min"]) * 60),
+            }).encode(), "application/json"
         statut, reponse = _requete(f"{self.URL}/my/activities/", "POST", corps, self._entetes(**{"Content-Type": type_}))
         if statut in (200, 201, 202):
-            return "envoye"  # Smashrun ignore une course de même départ déjà venue d'une autre appli
+            return "envoye"
         if statut == 401:
             raise NonConfiguree("Smashrun : jeton expiré (12 semaines), en recopier un depuis api.smashrun.com/v1/explorer")
         return f"refuse : {statut} {str(reponse)[:120]}"

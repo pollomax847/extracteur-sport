@@ -29,7 +29,19 @@ PAGE = Path(__file__).resolve().parent / "web.html"
 PORT = int(os.environ.get("SPORT_WEB_PORT", "8090"))
 ENDURAIN_PUBLIC = os.environ.get("ENDURAIN_PUBLIC_URL", "http://localhost:8080")
 HEURE_AUTO = os.environ.get("SPORT_AUTO_HEURE", "04:00")
-PUBLIC = os.environ.get("SPORT_PUBLIC_URL", "http://localhost:8090")  # adresse de retour de l'autorisation Strava
+PUBLIC = os.environ.get("SPORT_PUBLIC_URL", "http://localhost:8090")  # adresse de retour des autorisations
+# Smashrun rend le jeton dans le fragment de l'adresse (#access_token=…), que seul le navigateur voit : cette page le lit
+# et l'enregistre comme le formulaire (vérifié auprès de Smashrun). Le « + » du jeton est gardé tel quel.
+RETOUR_SMASHRUN = """<!doctype html><meta charset="utf-8"><title>Smashrun</title><p>Connexion à Smashrun…</p>
+<script>
+const champs = Object.fromEntries(location.hash.slice(1).split("&").map((p) => p.split("=").map(decodeURIComponent)));
+const fin = (r) => location.replace("/?smashrun=" + encodeURIComponent(r));
+if (!champs.access_token) fin(champs.error || new URLSearchParams(location.search).get("error") || "autorisation refusée");
+else fetch("/api/destination", { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ nom: "smashrun", champs: { SMASHRUN_TOKEN: champs.access_token } }) })
+  .then((r) => r.json().then((d) => fin(r.ok ? "ok" : d.erreur || "refusé")))
+  .catch((e) => fin(String(e)));
+</script>"""
 
 
 class Tache:
@@ -109,8 +121,7 @@ def etat():
     for nom in sport.DESTINATIONS:
         envois = sport.etat_envois(nom)
         statuts = Counter(v.split(" :")[0] for v in envois.values())
-        acceptes = sport.SPORTS_ACCEPTES.get(nom)  # Smashrun : la course seulement
-        proposees = [l for l in bibliotheque if not acceptes or l["sport"] in acceptes]
+        proposees = [l for l in bibliotheque if sport.proposee(nom, l)]  # Smashrun : courses avec distance
         destinations[nom] = {"configuree": destination_configuree(nom, conf), "envoye": statuts.get("envoye", 0),
                              "deja": statuts.get("deja", 0), "refuse": statuts.get("refuse", 0), "total": len(proposees),
                              # activités de la bibliothèque actuelle jamais traitées (le journal garde aussi d'anciens noms)
@@ -246,6 +257,12 @@ class Gestionnaire(BaseHTTPRequestHandler):
                 self._rediriger("/?strava=ok")
             except Exception as e:
                 self._rediriger("/?strava=" + urllib.parse.quote(str(e)[:200]))
+        elif self.path == "/smashrun/autoriser":
+            import destinations
+
+            self._rediriger(destinations.Smashrun.lien_autorisation(f"{PUBLIC}/smashrun/retour"))
+        elif self.path.startswith("/smashrun/retour"):
+            self._repondre(200, RETOUR_SMASHRUN.encode(), "text/html")
         elif self.path.startswith("/api/journal"):
             depuis = int(self.path.partition("depuis=")[2] or 0)
             self._repondre(200, {"lignes": TACHE.lignes[depuis:], "total": len(TACHE.lignes),
