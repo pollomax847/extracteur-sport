@@ -12,7 +12,7 @@
 import bisect
 import csv
 import re
-from collections import Counter
+from collections import Counter, defaultdict
 from datetime import timedelta
 from pathlib import Path
 
@@ -501,7 +501,35 @@ def preparer(seances, journal=print):
     ecartees += restes
     journal(f"  {len(courts)} séances trop courtes (détection automatique de pas surtout) : {len(recollees)} sortie(s) "
             f"recollée(s) de leurs morceaux, le reste écarté et listé dans ecartees.csv")
+    gardees, doublons = meme_depart(gardees)
+    ecartees += doublons
+    journal(f"  {len(doublons)} activité(s) au même départ à la seconde qu'une autre : confondues avec elle")
     return gardees, ecartees
+
+
+def meme_depart(gardees):
+    """Deux activités retenues qui partent à la même seconde sont la même sortie, vue par deux applis qui n'en ont
+    pas enregistré la même durée (ex. 23 min de marche Google Fit et 6.8 min de « course » Runtastic, même 0.938 km) :
+    le regroupement ne les a pas réunies (durées trop différentes, ou heure corrigée après coup). On garde le meilleur
+    exemplaire : avec trace GPS d'abord, puis celui qui va le plus loin (l'autre n'en a enregistré qu'un bout, ex. 12 min
+    de Moves pour 5.4 km de course Google Fit), puis le meilleur score. L'autre rejoint ses sources et est listé dans
+    ecartees.csv. → (gardées, écartées)"""
+    par_depart = defaultdict(list)
+    for g in gardees:
+        par_depart[g[0].debut].append(g)
+    retenues, doublons = [], []
+    for groupe in par_depart.values():
+        gps = any(g[0].gps for g in groupe)
+        plus_loin = max((g[0].distance or 0) for g in groupe if g[0].gps or not gps)
+        groupe.sort(key=lambda g: (gps and not g[0].gps, (g[0].distance or 0) < 0.98 * plus_loin, -score(g[0]),
+                                   -g[0].nb_points, -(g[0].distance or 0), g[0].source, _relatif(g[0].chemin)))
+        s, membres, raison = groupe[0]
+        for autre, autres_membres, _ in groupe[1:]:
+            deja = {id(m) for m in membres}
+            membres = membres + [m for m in autres_membres if id(m) not in deja]
+            doublons.append((autre, autres_membres, f"même départ que {_nom_fichier(s)} : même sortie"))
+        retenues.append((s, membres, raison))
+    return retenues, doublons
 
 
 CATEGORIES = {  # (sport, sous-sport) → dossier de rangement ; sous-sport absent = tous les autres
