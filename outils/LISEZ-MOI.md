@@ -38,6 +38,7 @@ outils/sport.py lots runalyze --importes # une fois l'import fait : notées envo
 outils/sport.py montre                   # sauvegarde de la montre (lancé tout seul au branchement)
 outils/sport.py auto                     # montre + conversion + santé + envois choisis
 outils/sport.py refaire garmin           # retire de Garmin ce que l'ancienne version y a envoyé
+outils/sport.py retirer endurain         # retire ce que l'outil a envoyé et qui n'est plus dans la bibliothèque (garmin, endurain, smashrun ; --essai pour voir)
 ```
 Une seule commande longue tourne à la fois, que ce soit dans le terminal ou l'interface. Le verrou est `outils/.verrou`.
 
