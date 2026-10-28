@@ -1,9 +1,12 @@
-"""Pas, poids et sommeil de toutes les sources, une valeur par jour (utilisé par sport.py).
+"""Pas, poids et sommeil de toutes les sources, une valeur par jour (utilisé par relais.py).
 
 Sources reconnues, quel que soit le dossier, y compris dans les ZIP : Samsung Health (CSV), Withings, Mi Fit / Zepp (CSV),
-Runtastic / adidas Running (JSON), Google Fit (« Résumés quotidiens.csv »), Moves (CSV) et Health Sync (poids et sommeil).
+Runtastic / adidas Running (JSON), Google Fit (« Résumés quotidiens.csv »), Moves (CSV), Health Sync (poids et sommeil)
+et la montre Garmin (Monitor/*.FIT : pas, fréquence cardiaque, stress, minutes d'intensité).
 Les pas de Health Sync ne sont pas lus : l'export mélange sans les nommer les comptes de plusieurs applis (25/10/2026 :
-41 500 pas en tout, la montre en avait compté 9 121 à 10 h 42) et rien ne permet de les séparer.
+41 500 pas en tout, la montre en avait compté 9 779 à 10 h 42) et rien ne permet de les séparer.
+Le sommeil de la montre n'est pas lu : sur l'Instinct, les phases sont calculées par les serveurs Garmin à partir de
+données brutes non documentées, et Sleep/*.FIT ne contient que les minutes d'éveil qui suivent la nuit.
 
 Doublons : plusieurs applications comptent souvent la même journée.
 - pas : on garde le plus grand total du jour (le téléphone et le bracelet comptent chacun une partie) ;
@@ -71,6 +74,33 @@ class Sommeil:
         return sum(v is not None for v in (self.debut, self.profond, self.leger, self.rem, self.eveil, self.fc_moy))
 
 
+@dataclass
+class JourneeMontre:
+    """Une journée vue par la montre Garmin. Un jour peut être réparti sur plusieurs fichiers Monitor."""
+    jour: date  # jour local de la montre
+    pas: dict = field(default_factory=dict)  # type d'activité (walking, running) → pas cumulés depuis minuit
+    fc: list = field(default_factory=list)  # fréquences cardiaques relevées au poignet
+    stress: list = field(default_factory=list)  # niveaux 0–100 (la montre note -1 ou -2 quand elle ne mesure pas)
+    repos: list = field(default_factory=list)  # (heure FIT, FC de repos du jour) : la dernière fait foi
+    moderees: int = 0  # minutes d'intensité modérée
+    intenses: int = 0  # minutes d'intensité élevée (Garmin les compte double dans son objectif de la semaine)
+
+    def total_pas(self):
+        return int(sum(self.pas.values()))
+
+    def fc_repos(self):
+        return max(self.repos)[1] if self.repos else None
+
+    def ajouter(self, autre):
+        for type_, n in autre.pas.items():
+            self.pas[type_] = max(n, self.pas.get(type_, 0))
+        self.fc += autre.fc
+        self.stress += autre.stress
+        self.repos += autre.repos
+        self.moderees += autre.moderees
+        self.intenses += autre.intenses
+
+
 def _nom(fichier):
     return unicodedata.normalize("NFC", fichier.name)
 
@@ -106,11 +136,69 @@ def _samsung_heure(texte):
     return datetime.fromisoformat(texte).replace(tzinfo=timezone.utc)  # les heures Samsung sont en UTC
 
 
-# --- lecteurs : chacun produit des tuples ("pas", jour, nombre, source), ("poids", Poids) ou ("sommeil", Sommeil)
+EPOQUE_FIT = datetime(1989, 12, 31, tzinfo=timezone.utc)
+TYPES_PAS = {"walking", "running"}  # pour les autres types (vélo, générique), les « cycles » ne sont pas des pas
+
+
+def _journees_montre(fichier):
+    """Monitor/*.FIT d'une montre Garmin : une JourneeMontre par jour local couvert par le fichier.
+
+    Vérifié le 28/10/2026 sur l'Instinct (MAPA4204.FIT, 25/10/2026) : les compteurs de pas sont cumulés depuis minuit
+    pour chaque type d'activité (9 121 en course + 658 en marche à 10 h 42) ; la plupart des messages ne portent
+    qu'un horodatage sur 16 bits, relatif au dernier horodatage complet ; le décalage horaire de la montre change
+    dans le fichier au passage à l'heure d'hiver (monitoring_info : local_timestamp - timestamp)."""
+    from garmin_fit_sdk import Decoder, Stream
+
+    messages, _ = Decoder(Stream.from_byte_array(bytearray(fichier.read_bytes()))).read(convert_datetimes_to_dates=False)
+    if not messages.get("monitoring_mesgs"):
+        return
+    decalages = sorted((i["timestamp"], i["local_timestamp"] - i["timestamp"])
+                       for i in messages.get("monitoring_info_mesgs", []) if i.get("timestamp") and i.get("local_timestamp"))
+    journees = {}
+
+    def journee(t):
+        decalage = next((d for debut, d in reversed(decalages) if debut <= t), decalages[0][1] if decalages else None)
+        heure = EPOQUE_FIT + timedelta(seconds=t)
+        jour = (heure + timedelta(seconds=decalage)).date() if decalage is not None else heure.astimezone(FUSEAU).date()
+        return journees.setdefault(jour, JourneeMontre(jour))
+
+    t = None
+    for m in messages["monitoring_mesgs"]:
+        if m.get("timestamp") is not None:
+            t = m["timestamp"]
+        elif m.get("timestamp_16") is not None and t is not None:
+            t += (m["timestamp_16"] - t) & 0xFFFF
+        else:
+            continue
+        j = journee(t)
+        if m.get("heart_rate"):
+            j.fc.append(m["heart_rate"])
+        if m.get("activity_type") in TYPES_PAS and m.get("cycles") is not None:
+            pas = m.get("steps") or m["cycles"] * 2  # un cycle = deux pas
+            j.pas[m["activity_type"]] = max(pas, j.pas.get(m["activity_type"], 0))
+        j.moderees += m.get("moderate_activity_minutes") or 0
+        j.intenses += m.get("vigorous_activity_minutes") or 0
+    for s in messages.get("stress_level_mesgs", []):
+        if s.get("stress_level_time") and s.get("stress_level_value") is not None and 0 <= s["stress_level_value"] <= 100:
+            journee(s["stress_level_time"]).stress.append(s["stress_level_value"])
+    for h in messages.get("monitoring_hr_data_mesgs", []):
+        if h.get("timestamp") and h.get("current_day_resting_heart_rate"):
+            journee(h["timestamp"]).repos.append((h["timestamp"], h["current_day_resting_heart_rate"]))
+    for j in journees.values():
+        yield "montre", j
+
+
+# --- lecteurs : chacun produit des tuples ("pas", jour, nombre, source), ("poids", Poids), ("sommeil", Sommeil)
+# ou ("montre", JourneeMontre)
 
 def _lire(fichier):
     nom = _nom(fichier)
     parent = unicodedata.normalize("NFC", fichier.parent.name)
+
+    if fichier.suffix.lower() == ".fit":
+        if parent.lower() == "monitor":
+            yield from _journees_montre(fichier)
+        return
 
     if nom.startswith(("com.samsung.shealth.tracker.pedometer_day_summary.", "com.samsung.shealth.activity.day_summary.")):
         for l in _csv(fichier, True):
@@ -284,20 +372,26 @@ def _sommeil_health_sync(fichier):
 
 
 def collecter(racines, exclus=()):
-    """Lit toutes les racines et renvoie (pas, poids, sommeil), une entrée par jour, et le nombre de valeurs lues."""
-    pas, poids, sommeil, pesees = {}, {}, {}, []
+    """Lit toutes les racines et renvoie (pas, poids, sommeil, montre), une entrée par jour, et le nombre de valeurs lues."""
+    pas, poids, sommeil, montre, pesees = {}, {}, {}, {}, []
     lus = {"pas": 0, "poids": 0, "sommeil": 0, "écartés": 0}
     for racine in racines:
         if not racine.is_dir():
             continue
         for fichier in fichiers.parcourir(racine, exclus):  # dossiers et contenu des ZIP
-            if fichier.suffix not in (".csv", ".json"):
+            if fichier.suffix.lower() not in (".csv", ".json", ".fit"):
                 continue
             try:
                 valeurs = list(_lire(fichier))
             except (ValueError, KeyError, TypeError, json.JSONDecodeError, UnicodeDecodeError):
                 continue  # fichier d'un autre format qui porte le même nom
             for v in valeurs:
+                if v[0] == "montre":
+                    if v[1].jour in montre:
+                        montre[v[1].jour].ajouter(v[1])
+                    else:
+                        montre[v[1].jour] = v[1]
+                    continue
                 lus[v[0]] += 1
                 if v[0] == "pas":
                     _, jour, n, source = v
@@ -316,12 +410,20 @@ def collecter(racines, exclus=()):
                         lus["écartés"] += 1
                     elif s.jour not in sommeil or (s.details(), s.total) > (sommeil[s.jour].details(), sommeil[s.jour].total):
                         sommeil[s.jour] = s
+    for jour, j in montre.items():
+        n = j.total_pas()
+        if n:
+            lus["pas"] += 1
+            if n > PAS_MAX:
+                lus["écartés"] += 1
+            elif n > pas.get(jour, (0, ""))[0]:
+                pas[jour] = (n, "Montre Garmin")
     gardees = _vraies_pesees(pesees)
     lus["écartés"] += len(pesees) - len(gardees)
     for p in gardees:
         if p.jour not in poids or (p.details(), p.heure) > (poids[p.jour].details(), poids[p.jour].heure):
             poids[p.jour] = p
-    return pas, poids, sommeil, lus
+    return pas, poids, sommeil, montre, lus
 
 
 def _vraies_pesees(pesees):
@@ -384,8 +486,8 @@ def json_sommeil(s):
     return corps
 
 
-def ecrire_csv(dossier, pas, poids, sommeil):
-    """Copie lisible des valeurs retenues (sante/pas.csv, poids.csv, sommeil.csv)."""
+def ecrire_csv(dossier, pas, poids, sommeil, montre):
+    """Copie lisible des valeurs retenues (sante/pas.csv, poids.csv, sommeil.csv, montre.csv)."""
     dossier.mkdir(parents=True, exist_ok=True)
     with (dossier / "pas.csv").open("w", newline="") as f:
         w = csv.writer(f)
@@ -401,3 +503,10 @@ def ecrire_csv(dossier, pas, poids, sommeil):
         h = lambda s: round(s / 3600, 2) if s else ""
         w.writerows([j.isoformat(), s.debut.isoformat() if s.debut else "", s.fin.isoformat() if s.fin else "",
                      h(s.total), h(s.profond), h(s.leger), h(s.rem), s.source] for j, s in sorted(sommeil.items()))
+    with (dossier / "montre.csv").open("w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(["date", "pas", "fc_repos", "fc_min", "fc_moy", "fc_max", "stress_moy", "minutes_moderees",
+                    "minutes_intenses"])
+        w.writerows([j.isoformat(), m.total_pas() or "", m.fc_repos() or "", min(m.fc, default=""), round(sum(m.fc) / len(m.fc)) if m.fc else "",
+                     max(m.fc, default=""), round(sum(m.stress) / len(m.stress)) if m.stress else "", m.moderees, m.intenses]
+                    for j, m in sorted(montre.items()))

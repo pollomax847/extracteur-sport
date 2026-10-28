@@ -12,10 +12,10 @@ docker compose logs -f endurain
 ```
 Interface : http://localhost:8080. Identifiant de départ : admin / admin, à changer dès la première connexion.
 
-Le même `docker compose` démarre aussi **sport-outils** sur http://localhost:8090. C'est l'interface web de `outils/sport.py` : conversion en FIT, tri, envoi vers Garmin Connect et sauvegarde de la montre. Voir `outils/LISEZ-MOI.md`.
+Le même `docker compose` démarre aussi **relais** sur http://localhost:8090. C'est l'interface web de `outils/relais.py` : conversion en FIT, tri, envoi vers Garmin Connect et sauvegarde de la montre. Voir `outils/LISEZ-MOI.md`.
 
 ## Importer l'historique
-Les activités sont préparées par `outils/sport.py preparer` dans `activites-v2/`, puis envoyées à Endurain depuis l'interface http://localhost:8090 (carte « Endurain ») ou avec `outils/sport.py envoyer endurain`. Endurain écarte les doublons.
+Les activités sont préparées par `outils/relais.py preparer` dans `activites-v2/`, puis envoyées à Endurain depuis l'interface http://localhost:8090 (carte « Endurain ») ou avec `outils/relais.py envoyer endurain`. Endurain écarte les doublons.
 
 ## Synchronisation
 - **Garmin Connect** : Paramètres → Intégrations, avec votre identifiant Garmin. La synchronisation est automatique toutes les heures.

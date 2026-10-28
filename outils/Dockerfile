@@ -1,5 +1,5 @@
-# Interface web de sport.py. Le code n'est pas copié dans l'image : il est monté depuis le projet,
-# une modification de sport.py est donc prise en compte au redémarrage du conteneur.
+# Interface web de relais.py. Le code n'est pas copié dans l'image : il est monté depuis le projet,
+# une modification de relais.py est donc prise en compte au redémarrage du conteneur.
 FROM python:3.12-slim
 
 RUN pip install --no-cache-dir garminconnect==0.3.20 garmin-fit-sdk==21.218.0 fitdecode==0.11.0 pyyaml==6.0.2

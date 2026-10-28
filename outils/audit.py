@@ -1,5 +1,5 @@
 """Audit de la bibliothèque activites-uniques/ : mesures de chaque activité, contrôles de vraisemblance
-et comparaisons entre sources (utilisé par « sport.py audit »).
+et comparaisons entre sources (utilisé par « relais.py audit »).
 
 Produit dans analyse/ :
 - activites.csv : une ligne par activité (sport, départ, durée, distance, points, GPS, cardio, appli d'origine…) ;

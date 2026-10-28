@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Interface web de sport.py (conteneur « sport-outils », à côté d'Endurain).
+"""Interface web de relais.py (conteneur « relais », à côté d'Endurain).
 
-Chaque bouton lance une commande sport.py et affiche sa sortie en direct. La connexion à Garmin Connect
+Chaque bouton lance une commande relais.py et affiche sa sortie en direct. La connexion à Garmin Connect
 (mot de passe puis code MFA) se fait ici : les jetons sont enregistrés comme avec le terminal, et
 « envoyer garmin » les réutilise. Les identifiants Endurain (pour la santé et l'import automatique)
 sont enregistrés dans sport.env.
 
-Mode automatique : « sport.py auto » est lancé chaque jour à SPORT_AUTO_HEURE (« 04:00 » par défaut,
+Mode automatique : « relais.py auto » est lancé chaque jour à SPORT_AUTO_HEURE (« 04:00 » par défaut,
 « non » pour le désactiver), si aucune autre commande ne tourne. Port : SPORT_WEB_PORT (8090 par défaut).
 """
 import csv
@@ -22,9 +22,9 @@ from datetime import datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-import sport
+import relais
 
-SPORT_PY = Path(__file__).resolve().parent / "sport.py"
+RELAIS_PY = Path(__file__).resolve().parent / "relais.py"
 PAGE = Path(__file__).resolve().parent / "web.html"
 PORT = int(os.environ.get("SPORT_WEB_PORT", "8090"))
 ENDURAIN_PUBLIC = os.environ.get("ENDURAIN_PUBLIC_URL", "http://localhost:8080")
@@ -62,7 +62,7 @@ class Tache:
             if self.en_cours():
                 return False
             self.commande, self.lignes, self.code = " ".join(args), [], None
-            self.proc = subprocess.Popen([sys.executable, "-u", str(SPORT_PY), *args], stdin=subprocess.DEVNULL,
+            self.proc = subprocess.Popen([sys.executable, "-u", str(RELAIS_PY), *args], stdin=subprocess.DEVNULL,
                                          stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
         threading.Thread(target=self._lire, args=(self.proc,), daemon=True).start()
         return True
@@ -100,34 +100,34 @@ def planificateur():
 
 def enregistrer_identifiants_endurain(utilisateur, mot_de_passe):
     """Vérifie les identifiants auprès d'Endurain puis les écrit dans sport.env (lisible par vous seul)."""
-    conf = sport.config()
+    conf = relais.config()
     conf.update(ENDURAIN_USER=utilisateur, ENDURAIN_PASSWORD=mot_de_passe)
-    sport.Endurain(conf)._connexion()  # lève une erreur si Endurain refuse
-    lignes = [l for l in sport.CONFIG.read_text().splitlines()
-              if not l.startswith(("ENDURAIN_USER=", "ENDURAIN_PASSWORD="))] if sport.CONFIG.exists() else []
-    sport.CONFIG.write_text("\n".join(lignes + [f"ENDURAIN_USER={utilisateur}", f"ENDURAIN_PASSWORD={mot_de_passe}"]) + "\n")
-    sport.CONFIG.chmod(0o600)
+    relais.Endurain(conf)._connexion()  # lève une erreur si Endurain refuse
+    lignes = [l for l in relais.CONFIG.read_text().splitlines()
+              if not l.startswith(("ENDURAIN_USER=", "ENDURAIN_PASSWORD="))] if relais.CONFIG.exists() else []
+    relais.CONFIG.write_text("\n".join(lignes + [f"ENDURAIN_USER={utilisateur}", f"ENDURAIN_PASSWORD={mot_de_passe}"]) + "\n")
+    relais.CONFIG.chmod(0o600)
     return {"ok": True}
 
 
 def etat():
-    montre = sport.trouver_montre()
-    conf = sport.config()
+    montre = relais.trouver_montre()
+    conf = relais.config()
     bibliotheque = []
-    if sport.V2.exists() and (sport.V2 / "index.csv").exists():
-        with (sport.V2 / "index.csv").open() as f:
+    if relais.V2.exists() and (relais.V2 / "index.csv").exists():
+        with (relais.V2 / "index.csv").open() as f:
             bibliotheque = list(csv.DictReader(f))
     destinations = {}
-    for nom in sport.DESTINATIONS:
-        envois = sport.etat_envois(nom)
-        proposees = [l for l in bibliotheque if sport.proposee(nom, l)]  # Smashrun : courses avec distance
+    for nom in relais.DESTINATIONS:
+        envois = relais.etat_envois(nom)
+        proposees = [l for l in bibliotheque if relais.proposee(nom, l)]  # Smashrun : courses avec distance
         # statuts des seules activités proposées (le journal garde aussi d'anciens noms et des activités non proposées)
         statuts = Counter(envois[l["fichier"]].split(" :")[0] for l in proposees if l["fichier"] in envois)
         destinations[nom] = {"configuree": destination_configuree(nom, conf), "envoye": statuts.get("envoye", 0),
                              "deja": statuts.get("deja", 0), "refuse": statuts.get("refuse", 0), "total": len(proposees),
                              # activités de la bibliothèque actuelle jamais traitées (le journal garde aussi d'anciens noms)
                              "restantes": sum(l["fichier"] not in envois for l in proposees)}
-    index = sport.V2 / "index.csv"
+    index = relais.V2 / "index.csv"
     return {
         "bibliotheque": {"total": len(bibliotheque),
                          "categories": dict(Counter(l["categorie"] for l in bibliotheque).most_common()),
@@ -136,21 +136,34 @@ def etat():
                          "convertie_le": datetime.fromtimestamp(index.stat().st_mtime).strftime("%d/%m/%Y à %H:%M") if index.exists() else None},
         "destinations": destinations,
         "montre": str(montre) if montre else None,
-        "endurain": sport.endurain_actif(conf),
+        "endurain": relais.endurain_actif(conf),
         "endurain_url": ENDURAIN_PUBLIC,
         "cle_api": bool(conf.get("ENDURAIN_API_KEY")),
         "endurain_identifiants": bool(conf.get("ENDURAIN_PASSWORD")),
         "prochain_auto": prochain.strftime("%d/%m à %H:%M") if (prochain := prochain_auto()) else None,
-        "garmin_connecte": sport.JETONS_GARMIN.is_dir() and any(sport.JETONS_GARMIN.iterdir()),
+        "garmin_connecte": relais.JETONS_GARMIN.is_dir() and any(relais.JETONS_GARMIN.iterdir()),
         "commande": TACHE.commande if TACHE.en_cours() else None,
     }
 
 
+def sante():
+    """Valeurs retenues par « relais.py sante » (sante/*.csv), une ligne [date, valeur…] par jour, pour la section Santé."""
+    def lire(nom, colonnes):
+        fichier = relais.SANTE / nom
+        if not fichier.exists():
+            return []
+        with fichier.open() as f:
+            return [[l["date"], *(float(l[c]) if l.get(c) else None for c in colonnes)] for l in csv.DictReader(f)]
+
+    return {"pas": lire("pas.csv", ["pas"]), "poids": lire("poids.csv", ["kg"]), "sommeil": lire("sommeil.csv", ["total_h"]),
+            "montre": lire("montre.csv", ["pas", "fc_repos", "stress_moy"])}
+
+
 def destination_configuree(nom, conf):
     if nom == "garmin":
-        return sport.JETONS_GARMIN.is_dir() and any(sport.JETONS_GARMIN.iterdir())
+        return relais.JETONS_GARMIN.is_dir() and any(relais.JETONS_GARMIN.iterdir())
     if nom == "strava":
-        return bool(conf.get("STRAVA_CLIENT_ID")) and sport.JETONS_STRAVA.exists()
+        return bool(conf.get("STRAVA_CLIENT_ID")) and relais.JETONS_STRAVA.exists()
     return bool(conf.get({"intervals": "INTERVALS_API_KEY", "runalyze": "RUNALYZE_TOKEN",
                           "endurain": "ENDURAIN_API_KEY", "smashrun": "SMASHRUN_TOKEN"}[nom]))
 
@@ -167,24 +180,24 @@ def configurer_destination(nom, champs):
     if not all(valeurs.values()):
         raise ValueError("tous les champs sont nécessaires")
     if nom == "strava":  # vérifié à l'autorisation (bouton suivant)
-        sport.ecrire_config(**valeurs)
+        relais.ecrire_config(**valeurs)
         return {"ok": True, "autoriser": "/strava/autoriser"}
-    conf = sport.config()
+    conf = relais.config()
     conf.update(valeurs)
     cible = {"intervals": destinations.Intervals, "runalyze": destinations.Runalyze,
              "smashrun": destinations.Smashrun}[nom](conf)
     qui = cible.verifier()  # lève une erreur si le service refuse
-    sport.ecrire_config(**valeurs)
+    relais.ecrire_config(**valeurs)
     return {"ok": True, "compte": str(qui)}
 
 
 def connexion_garmin(email, mot_de_passe):
     from garminconnect import Garmin
 
-    sport.JETONS_GARMIN.mkdir(parents=True, exist_ok=True)
-    sport.JETONS_GARMIN.chmod(0o700)
+    relais.JETONS_GARMIN.mkdir(parents=True, exist_ok=True)
+    relais.JETONS_GARMIN.chmod(0o700)
     api = Garmin(email, mot_de_passe, return_on_mfa=True)
-    statut, etat_client = api.login(str(sport.JETONS_GARMIN))
+    statut, etat_client = api.login(str(relais.JETONS_GARMIN))
     if statut == "needs_mfa":
         CONNEXION_GARMIN.update(api=api, etat=etat_client)
         return {"mfa": True}
@@ -196,14 +209,14 @@ def code_mfa(code):
         raise ValueError("aucune connexion en attente : recommencez avec l'e-mail et le mot de passe")
     api = CONNEXION_GARMIN.pop("api")
     api.resume_login(CONNEXION_GARMIN.pop("etat"), code)
-    api.client.dump(str(sport.JETONS_GARMIN))
+    api.client.dump(str(relais.JETONS_GARMIN))
     return {"ok": True}
 
 
 def arguments(demande):
-    """Traduit un bouton de l'interface en arguments de sport.py (rien d'autre n'est accepté)."""
+    """Traduit un bouton de l'interface en arguments de relais.py (rien d'autre n'est accepté)."""
     commande = demande.get("commande")
-    if commande in ("montre", "etat", "sante", "auto", "preparer"):
+    if commande in ("montre", "etat", "sante", "auto", "preparer", "satellites"):
         return [commande]
     if commande == "convertir":
         chemin = (demande.get("chemin") or "").strip()
@@ -212,7 +225,7 @@ def arguments(demande):
         return ["convertir", chemin]
     if commande == "envoyer":
         cible = demande.get("destination") or "garmin"
-        if cible not in sport.DESTINATIONS:
+        if cible not in relais.DESTINATIONS:
             raise ValueError(f"destination inconnue : {cible}")
         args = ["envoyer", cible] + ([str(int(demande["nombre"]))] if demande.get("nombre") else [])  # tout par défaut
         return args + (["--reessayer"] if demande.get("reessayer") else [])
@@ -238,10 +251,12 @@ class Gestionnaire(BaseHTTPRequestHandler):
             self._repondre(200, PAGE.read_bytes(), "text/html")
         elif self.path == "/api/etat":
             self._repondre(200, etat())
+        elif self.path == "/api/sante":
+            self._repondre(200, sante())
         elif self.path == "/strava/autoriser":
             import destinations
 
-            client = sport.config().get("STRAVA_CLIENT_ID")
+            client = relais.config().get("STRAVA_CLIENT_ID")
             if not client:
                 return self._repondre(400, {"erreur": "Client ID Strava absent"})
             self._rediriger(destinations.Strava.lien_autorisation(client, f"{PUBLIC}/strava/retour"))
@@ -249,12 +264,12 @@ class Gestionnaire(BaseHTTPRequestHandler):
             import destinations
 
             requete = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
-            conf = sport.config()
+            conf = relais.config()
             try:
                 if "code" not in requete:
                     raise ValueError(requete.get("error", ["autorisation refusée"])[0])
                 destinations.Strava.echanger_code(conf["STRAVA_CLIENT_ID"], conf["STRAVA_CLIENT_SECRET"],
-                                                  requete["code"][0], sport.JETONS_STRAVA)
+                                                  requete["code"][0], relais.JETONS_STRAVA)
                 self._rediriger("/?strava=ok")
             except Exception as e:
                 self._rediriger("/?strava=" + urllib.parse.quote(str(e)[:200]))
@@ -299,6 +314,6 @@ class Gestionnaire(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
-    print(f"Interface sport.py sur le port {PORT} ; mode automatique : {prochain_auto() or 'désactivé'}")
+    print(f"Interface relais.py sur le port {PORT} ; mode automatique : {prochain_auto() or 'désactivé'}")
     threading.Thread(target=planificateur, daemon=True).start()
     ThreadingHTTPServer(("0.0.0.0", PORT), Gestionnaire).serve_forever()

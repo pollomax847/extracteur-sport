@@ -1,4 +1,4 @@
-"""Destinations d'envoi des activités de activites-v2/ (utilisé par sport.py et web.py).
+"""Destinations d'envoi des activités de activites-v2/ (utilisé par relais.py et web.py).
 
 Chaque destination envoie un FIT et répond « envoye », « deja » (le service l'a déjà) ou « refuse » ; elle lève
 Limite quand le service demande d'attendre. Le journal outils/.envoyes-<destination>-v2.txt mémorise le résultat
@@ -21,7 +21,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-NAVIGATEUR = "Mozilla/5.0 (X11; Linux x86_64) sport.py"  # intervals.icu filtre les clients sans user-agent
+NAVIGATEUR = "Mozilla/5.0 (X11; Linux x86_64) relais.py"  # intervals.icu filtre les clients sans user-agent
 
 
 class Limite(Exception):
@@ -212,7 +212,7 @@ class Runalyze:
 class Smashrun:
     """Jeton personnel : api.smashrun.com/v1/explorer, taper « client » en haut, « Connect », copier le jeton. Il expire
     au bout de 12 semaines (pas de renouvellement pour ces jetons). 250 requêtes par heure ; course à pied seulement
-    (sport.py ne lui propose que les courses). Une course avec trace part en FIT (champ « file », vérifié le
+    (relais.py ne lui propose que les courses). Une course avec trace part en FIT (champ « file », vérifié le
     27/10/2026) ; sans trace, Smashrun refuse le FIT (« no data to import ») : elle part en JSON (départ, durée,
     distance), à l'heure de Paris faute de mieux. Sans distance, Smashrun ne l'accepte pas."""
     nom, titre = "smashrun", "Smashrun"
@@ -242,7 +242,7 @@ class Smashrun:
 
     def presentes(self):
         """[(départ UTC, durée s)] des courses déjà sur le compte, quelle que soit l'appli qui les y a mises (Garmin,
-        Strava… : 567 courses le 27/10/2026, dont 209 que sport.py aurait renvoyées en double)."""
+        Strava… : 567 courses le 27/10/2026, dont 209 que relais.py aurait renvoyées en double)."""
         return [(debut, duree) for _, debut, duree, _ in self.activites()]
 
     def activites(self):

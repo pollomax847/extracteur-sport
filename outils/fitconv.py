@@ -1,9 +1,9 @@
-"""Écriture de fichiers FIT, le format natif de Garmin (utilisé par sport.py).
+"""Écriture de fichiers FIT, le format natif de Garmin (utilisé par relais.py).
 
 - lire_trace() + ecrire_fit() : convertit un TCX/GPX en FIT (≈ 20 fois plus léger, garde GPS, altitude,
   distance, cardio et cadence) ;
 - seance_fit() : crée une activité FIT à partir d'un simple résumé (date, durée, distance, calories…).
-Nécessite garmin-fit-sdk, installé dans l'environnement de sport.py.
+Nécessite garmin-fit-sdk, installé dans l'environnement de relais.py.
 """
 import io
 import math
@@ -212,3 +212,120 @@ def resume_trace(contenu, ext):
         distances = [p.dist for p in points if p.dist is not None]
         distance = distance or (max(distances) if distances else None)
     return sport, debut, duree, distance, calories, fc_moy, fc_max
+
+
+# --- parcours à suivre sur la montre (relais.py vers-montre)
+
+ECART_PARCOURS = 10  # m au moins entre deux points gardés : la montre allège encore elle-même la trace
+VITESSES_PARCOURS = {"running": 2.8, "cycling": 5.5, "walking": 1.3, "hiking": 1.1}  # m/s, trace sans heures
+CAPACITES_PARCOURS = 0x203  # processed | valid | navigation, comme les parcours que l'Instinct garde
+
+
+def lire_parcours(contenu, ext):
+    """(nom, sport, points) d'une trace GPX (trace ou itinéraire), TCX ou FIT. Contrairement à lire_trace(), les
+    points sans heure sont gardés : un itinéraire tracé sur une carte (AllTrails, Komoot…) n'en a pas."""
+    if ext == ".fit":
+        from garmin_fit_sdk import Decoder, Stream
+
+        messages, _ = Decoder(Stream.from_byte_array(bytearray(contenu))).read()
+        session = (messages.get("session_mesgs") or [{}])[0]
+        points = [Point(r.get("timestamp"), r["position_lat"] / SEMICERCLES, r["position_long"] / SEMICERCLES,
+                        r.get("enhanced_altitude", r.get("altitude")))
+                  for r in messages.get("record_mesgs", [])
+                  if r.get("position_lat") is not None and r.get("position_long") is not None]
+        return None, session.get("sport"), points
+
+    contenu = reparer_encodage(contenu)
+    nom = sport = courant = None
+    points, pile = [], []
+    for evenement, elem in ET.iterparse(io.BytesIO(contenu), events=("start", "end")):
+        balise = _local(elem.tag)
+        if evenement == "start":
+            pile.append(balise)
+            if balise in ("trkpt", "rtept", "Trackpoint"):
+                courant = {"lat": elem.get("lat"), "lon": elem.get("lon")}
+            elif balise == "Activity" and sport is None:
+                sport = elem.get("Sport")
+            continue
+        pile.pop()
+        texte = (elem.text or "").strip()
+        if courant is not None and texte:
+            cle = {"time": "temps", "Time": "temps", "ele": "alt", "AltitudeMeters": "alt",
+                   "LatitudeDegrees": "lat", "LongitudeDegrees": "lon"}.get(balise)
+            if cle:
+                courant[cle] = texte
+        elif texte and balise in ("name", "Name") and nom is None and pile and pile[-1] in ("trk", "rte", "Course"):
+            nom = texte
+        elif texte and balise == "type" and sport is None:
+            sport = texte  # GPX : <trk><type>
+        if balise in ("trkpt", "rtept", "Trackpoint"):
+            if courant.get("lat") and courant.get("lon"):
+                points.append(Point(_date(courant["temps"]) if courant.get("temps") else None,
+                                    float(courant["lat"]), float(courant["lon"]),
+                                    float(courant["alt"]) if courant.get("alt") else None))
+            courant = None
+            elem.clear()
+    return nom, sport, points
+
+
+def parcours_fit(nom, sport, points):
+    """Parcours FIT (type course) à déposer dans Garmin/NewFiles ; renvoie (octets, distance en m).
+
+    Même structure que les parcours envoyés à l'Instinct par Garmin Connect (vérifié le 28/10/2026) : course, un tour
+    avec le cadre de la trace, puis les points entre deux événements du chrono. Sans heures dans la trace, celles
+    du partenaire virtuel suivent VITESSES_PARCOURS à partir de maintenant."""
+    sport = sport_fit(sport)[0]
+    gardes, total = [], 0.0
+    for i, p in enumerate(points):
+        if gardes:
+            d = _distance(gardes[-1], p)
+            if d < ECART_PARCOURS and i < len(points) - 1:
+                continue
+            total += d
+        gardes.append(Point(p.temps, p.lat, p.lon, p.alt, total))
+    if len(gardes) < 2 or total < ECART_PARCOURS:
+        raise ValueError("trace trop courte")
+    heures = [p.temps for p in gardes]
+    if None in heures or heures != sorted(heures) or heures[0] == heures[-1]:
+        debut = datetime.now(timezone.utc).replace(microsecond=0)
+        vitesse = VITESSES_PARCOURS.get(sport, VITESSES_PARCOURS["walking"])
+        for p in gardes:
+            p.temps = debut + timedelta(seconds=p.dist / vitesse)
+    altitudes = [p.alt for p in gardes if p.alt is not None]
+    montee = sum(max(b - a, 0) for a, b in zip(altitudes, altitudes[1:]))
+    descente = sum(max(a - b, 0) for a, b in zip(altitudes, altitudes[1:]))
+    semi = lambda degres: round(degres * SEMICERCLES)
+    debut, fin = gardes[0], gardes[-1]
+    duree = max((fin.temps - debut.temps).total_seconds(), 1)
+
+    enc = Encoder()
+    enc.write_mesg({"mesg_num": MESG["FILE_ID"], "type": "course", "manufacturer": "development",
+                    "product": 1, "serial_number": 1, "time_created": datetime.now(timezone.utc)})
+    enc.write_mesg({"mesg_num": MESG["COURSE"], "name": nom[:16], "sport": sport, "capabilities": CAPACITES_PARCOURS})
+    tour = {"mesg_num": MESG["LAP"], "timestamp": debut.temps, "start_time": debut.temps,
+            "start_position_lat": semi(debut.lat), "start_position_long": semi(debut.lon),
+            "end_position_lat": semi(fin.lat), "end_position_long": semi(fin.lon),
+            "nec_lat": semi(max(p.lat for p in gardes)), "nec_long": semi(max(p.lon for p in gardes)),
+            "swc_lat": semi(min(p.lat for p in gardes)), "swc_long": semi(min(p.lon for p in gardes)),
+            "total_elapsed_time": duree, "total_timer_time": duree, "total_distance": total,
+            "event": "lap", "event_type": "stop", "lap_trigger": "session_end"}
+    if altitudes:
+        tour["total_ascent"], tour["total_descent"] = round(montee), round(descente)
+    enc.write_mesg(tour)
+    enc.write_mesg({"mesg_num": MESG["EVENT"], "timestamp": debut.temps, "event": "timer", "event_type": "start"})
+    for p in gardes:
+        rec = {"mesg_num": MESG["RECORD"], "timestamp": p.temps, "position_lat": semi(p.lat),
+               "position_long": semi(p.lon), "distance": p.dist}
+        if p.alt is not None:
+            rec["altitude"] = p.alt
+        enc.write_mesg(rec)
+    enc.write_mesg({"mesg_num": MESG["EVENT"], "timestamp": fin.temps, "event": "timer", "event_type": "stop_all"})
+    return enc.close(), total
+
+
+def type_fit(contenu):
+    """Type d'un FIT d'après son en-tête (activity, course, workout…), ou None."""
+    from garmin_fit_sdk import Decoder, Stream
+
+    messages, _ = Decoder(Stream.from_byte_array(bytearray(contenu))).read()
+    return (messages.get("file_id_mesgs") or [{}])[0].get("type")

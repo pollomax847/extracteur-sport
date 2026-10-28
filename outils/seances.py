@@ -33,7 +33,7 @@ DUREE_MAX = 16 * 3600  # au-delà : total journalier déguisé en activité
 VITESSE = {  # km/h plausibles en moyenne
     "walking": (1.5, 8.0), "hiking": (1.0, 7.0), "running": (5.0, 22.0), "cycling": (6.0, 50.0), "swimming": (0.5, 6.0),
 }
-DOSSIER_MONTRE = "montre-garmin"  # sauvegarde de la montre Garmin (sport.py le règle d'après chemins.yml)
+DOSSIER_MONTRE = "montre-garmin"  # sauvegarde de la montre Garmin (relais.py le règle d'après chemins.yml)
 VEHICULE = 28.0  # km/h moyens : au-delà, une marche ou une course est un trajet en véhicule (16 à 28 : vélo)
 POINTS_TRACE = 10  # en dessous : pas de vraie trace
 

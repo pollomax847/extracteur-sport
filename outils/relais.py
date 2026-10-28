@@ -1,19 +1,25 @@
 #!/usr/bin/env python3
 """Outil unique pour les données sport : conversion précise, montre Garmin, santé, envoi vers les services.
 
-  sport.py preparer     conversion précise de toutes les sources (sources-brutes/, ZIP compris) : une activité
-                        par sortie réelle, en FIT, rangée par catégorie dans activites-v2/ (+ contrôle)
-  sport.py sante        pas, poids et sommeil de toutes les sources → sante/, Endurain (et les pesées → Garmin)
-  sport.py envoyer <garmin|strava|intervals|runalyze|endurain|smashrun> [N] [--reessayer]
-                        envoie tout ce qui reste de activites-v2/ (ou N activités), de la plus ancienne à la plus
-                        récente, au rythme permis par le service
-  sport.py lots <destination> [--importes]
-                        copie les activités pas encore envoyées en lots à importer à la main sur le site du service
-                        (quand son API bloque un gros historique) ; --importes les note envoyées une fois l'import fait
-  sport.py montre       sauvegarde la montre branchée et envoie ses nouvelles activités à Endurain
-  sport.py auto         tout en une fois : montre, conversion, santé, envois choisis (SPORT_AUTO_DESTINATIONS)
-  sport.py refaire garmin   retire de Garmin ce que l'ancienne version y a envoyé (avant d'envoyer activites-v2)
-  sport.py etat         montre branchée ? Endurain en marche ?
+  relais.py preparer     conversion précise de toutes les sources (sources-brutes/, ZIP compris) : une activité
+                         par sortie réelle, en FIT, rangée par catégorie dans activites-v2/ (+ contrôle)
+  relais.py sante        pas, poids et sommeil de toutes les sources → sante/, Endurain (et les pesées → Garmin)
+  relais.py envoyer <garmin|strava|intervals|runalyze|endurain|smashrun> [N] [--reessayer]
+                         envoie tout ce qui reste de activites-v2/ (ou N activités), de la plus ancienne à la plus
+                         récente, au rythme permis par le service
+  relais.py lots <destination> [--importes]
+                         copie les activités pas encore envoyées en lots à importer à la main sur le site du service
+                         (quand son API bloque un gros historique) ; --importes les note envoyées une fois l'import fait
+  relais.py montre       sauvegarde la montre branchée, envoie ses nouvelles activités à Endurain et lui dépose
+                         les parcours et entraînements en attente
+  relais.py vers-montre <trace.gpx|.tcx|.fit>… [--nom NOM]
+                         prépare des parcours à suivre sur la montre (itinéraire AllTrails, activité à refaire…)
+  relais.py vers-montre garmin [nom ou numéro…]
+                         parcours et entraînements de Garmin Connect pour la montre (sans nom : la liste)
+  relais.py auto         tout en une fois : montre, conversion, santé, envois choisis (SPORT_AUTO_DESTINATIONS)
+  relais.py refaire garmin   retire de Garmin ce que l'ancienne version y a envoyé (avant d'envoyer activites-v2)
+  relais.py satellites   met à jour les données satellites (EPO) de la montre branchée, pour un GPS plus rapide
+  relais.py etat         montre branchée ? Endurain en marche ?
 
 Configuration (identifiants Endurain, clés des services) : ~/.config/sport/sport.env. Interface : http://localhost:8090
 """
@@ -28,6 +34,7 @@ import shutil
 import subprocess
 import sys
 import time
+import unicodedata
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -66,8 +73,9 @@ JETONS_STRAVA = Path.home() / ".config" / "sport" / "strava.json"
 VENV = Path.home() / ".local" / "share" / "sport" / "venv"
 VERROU = PROJET / "outils" / ".verrou"
 COMMANDES_EXCLUSIVES = {"envoyer", "sante", "auto", "refaire", "retirer", "preparer", "lots"}
-V2 = chemin(CHEMINS.get("activites", "activites-v2"))  # conversion précise : une activité par sortie réelle (sport.py preparer)
+V2 = chemin(CHEMINS.get("activites", "activites-v2"))  # conversion précise : une activité par sortie réelle (relais.py preparer)
 CORBEILLE = chemin(CHEMINS.get("corbeille", "a-supprimer"))  # anciennes versions de activites-v2 (jamais effacées par l'outil)
+VERS_MONTRE = chemin(CHEMINS.get("vers_montre", "vers-montre"))  # parcours et entraînements à déposer sur la montre
 SANTE = chemin(CHEMINS.get("sante", "sante"))  # pas, poids et sommeil retenus, en CSV lisibles
 ETAT_SANTE = PROJET / "outils" / ".sante-endurain.json"  # ce qui a déjà été envoyé à Endurain
 POIDS_GARMIN = PROJET / "outils" / ".poids-garmin.txt"  # pesées créées sur Garmin par l'outil (jour, kg)
@@ -79,11 +87,11 @@ SOURCES = {"projet": chemin(CHEMINS.get("donnees", ".")),
            **{nom: chemin(dossier) for nom, dossier in (CHEMINS.get("sources") or {}).items()}}
 # Google Drive/sport n'est plus lu par défaut : tout son contenu est déjà copié dans sport/ (inventaire du 25/10/2026 :
 # aucune activité unique) et ce disque NTFS est très lent quand il est occupé. Pour le relire :
-#   sport.py convertir "<disque>/Google Drive/sport"
+#   relais.py convertir "<disque>/Google Drive/sport"
 # Dans le projet : outils, documentation et la copie de travail d'Endurain ne sont pas des données
 EXCLUS_PROJET = {"endurain", "outils", "scripts", "documentation", "sante", "a-supprimer", "activites-v2", "analyse",
-                 "a-importer",  # lots préparés pour un import manuel (sport.py lots) : des copies de activites-v2
-                 SANTE.name, CORBEILLE.name, V2.name}
+                 "a-importer",  # lots préparés pour un import manuel (relais.py lots) : des copies de activites-v2
+                 SANTE.name, CORBEILLE.name, V2.name, VERS_MONTRE.name}
 
 # Dossiers de la montre qui contiennent vos données. Les autres (Debug, EDM, REMOTESW, TEXT…) sont internes à la montre.
 DOSSIERS_MONTRE = ["Activity", "Monitor", "Sleep", "Summary", "Records", "Totals",
@@ -167,13 +175,20 @@ def cmd_montre():
             shutil.copy2(fichier, cible)
             copies += 1
     print(f"Sauvegarde : {copies} fichier(s) copiés dans {ARCHIVE}")
+    try:
+        satellites(montre)
+    except (OSError, ValueError) as e:
+        print(f"Données satellites : non mises à jour ({e})")
+    deposes = deposer_sur_montre(montre)
+    if deposes:
+        notifier(f"{deposes} parcours ou entraînement(s) déposés sur la montre : débranchez-la pour qu'elle les importe.")
 
     conf = config()
     if not conf.get("ENDURAIN_API_KEY"):
         notifier(f"Montre sauvegardée ({copies} fichiers). Pas de clé d'API dans {CONFIG} : rien n'est envoyé à Endurain.")
         return
     if not endurain_actif(conf):
-        notifier(f"Montre sauvegardée ({copies} fichiers). Endurain ne répond pas : relancez « sport.py montre » une fois Endurain démarré.")
+        notifier(f"Montre sauvegardée ({copies} fichiers). Endurain ne répond pas : relancez « relais.py montre » une fois Endurain démarré.")
         return
 
     deja = set(ENVOYES.read_text().split()) if ENVOYES.exists() else set()
@@ -193,6 +208,170 @@ def cmd_montre():
     notifier(f"Montre sauvegardée ({copies} fichiers), {len(envoyes)} nouvelle(s) activité(s) envoyée(s) à Endurain.")
 
 
+EPO_URL = "https://epodownload.mediatek.com/EPO.DAT"  # la source de Garmin pour ses puces MediaTek
+EPO_JEU = 2304  # octets par jeu de 6 h (32 satellites × 72 octets), chacun commençant par son heure GPS sur 3 octets
+EPO_JEUX = 4 * 9  # les montres Garmin n'en lisent que 9 jours
+EPO_VIEUX = 2  # jours au-delà desquels « relais.py montre » remplace les données de la montre
+DEBUT_GPS = datetime(1980, 1, 6, tzinfo=timezone.utc)
+
+
+def epo_debut(donnees):
+    """Début de validité de données EPO (heure GPS du premier jeu)."""
+    return DEBUT_GPS + timedelta(hours=int.from_bytes(donnees[:3], "little"))
+
+
+def fichier_epo(montre):
+    """Garmin/RemoteSW/EPO.BIN de la montre (casse quelconque), ou None si elle n'en a pas."""
+    for dossier in (montre / "Garmin").iterdir():
+        if dossier.name.lower() == "remotesw" and dossier.is_dir():
+            return next((f for f in dossier.iterdir() if f.name.lower() == "epo.bin"), None)
+    return None
+
+
+def satellites(montre, forcer=False):
+    """Remplace l'EPO.BIN de la montre par les orbites prévues des 9 prochains jours, comme Garmin Express.
+
+    Seulement si la montre a déjà ce fichier : celles qui utilisent CPE.BIN (puces Sony) n'ont pas de source
+    publique et sont laissées telles quelles. Les données sont vérifiées (taille, date) avant d'être écrites."""
+    actuel = fichier_epo(montre)
+    if actuel is None:
+        print("Données satellites : la montre n'a pas de RemoteSW/EPO.BIN, rien n'est écrit")
+        return False
+    ancien = actuel.read_bytes()
+    if ancien and len(ancien) % EPO_JEU:
+        print(f"Données satellites : l'EPO.BIN de la montre n'a pas le format attendu ({len(ancien)} octets), laissé tel quel")
+        return False
+    age = datetime.now(timezone.utc) - epo_debut(ancien) if len(ancien) >= 3 else None
+    if not forcer and age is not None and age < timedelta(days=EPO_VIEUX):
+        print(f"Données satellites : à jour (depuis le {epo_debut(ancien):%d/%m %H h} UTC)")
+        return False
+    with urllib.request.urlopen(EPO_URL, timeout=30) as resp:
+        donnees = resp.read()
+    if len(donnees) != 120 * EPO_JEU:
+        raise ValueError(f"taille inattendue des données MediaTek ({len(donnees)} octets)")
+    if abs(datetime.now(timezone.utc) - epo_debut(donnees)) > timedelta(days=3):
+        raise ValueError(f"données MediaTek datées du {epo_debut(donnees):%d/%m/%Y}")
+    temporaire = actuel.with_name(actuel.name + ".tmp")
+    temporaire.write_bytes(donnees[:EPO_JEUX * EPO_JEU])
+    os.replace(temporaire, actuel)
+    print(f"Données satellites : mises à jour, valables 9 jours à partir du {epo_debut(donnees):%d/%m %H h} UTC")
+    return True
+
+
+def cmd_satellites():
+    montre = trouver_montre()
+    if not montre:
+        sys.exit("Aucune montre Garmin branchée (pas de dossier Garmin/ sur un disque USB monté).")
+    try:
+        satellites(montre, forcer=True)
+    except (OSError, ValueError) as e:
+        sys.exit(f"Données satellites : non mises à jour ({e})")
+
+
+def deposer_sur_montre(montre):
+    """Copie dans Garmin/NewFiles les FIT en attente dans VERS_MONTRE : la montre les range dans Courses/ ou Workouts/
+    quand on la débranche. Les fichiers déposés passent dans VERS_MONTRE/deposes/."""
+    attente = sorted(VERS_MONTRE.glob("*.fit")) if VERS_MONTRE.is_dir() else []
+    if not attente:
+        return 0
+    (montre / "Garmin" / "NewFiles").mkdir(exist_ok=True)
+    (VERS_MONTRE / "deposes").mkdir(exist_ok=True)
+    for fichier in attente:
+        shutil.copyfile(fichier, montre / "Garmin" / "NewFiles" / fichier.name)
+        fichier.replace(VERS_MONTRE / "deposes" / fichier.name)
+        print(f"  {fichier.name} : déposé sur la montre")
+    return len(attente)
+
+
+def mettre_en_attente(nom, contenu, prets):
+    """Range un FIT prêt pour la montre dans VERS_MONTRE, sous un nom sans accents (mémoire FAT de la montre).
+    Un fichier en attente du même nom est remplacé, sauf s'il vient de la même commande (prets)."""
+    simple = unicodedata.normalize("NFKD", nom).encode("ascii", "ignore").decode()
+    base = re.sub(r"[^A-Za-z0-9-]+", "_", simple).strip("_")[:30] or "parcours"
+    cible, n = VERS_MONTRE / f"{base}.fit", 1
+    while cible in prets:
+        n += 1
+        cible = VERS_MONTRE / f"{base}-{n}.fit"
+    VERS_MONTRE.mkdir(parents=True, exist_ok=True)
+    cible.write_bytes(contenu)
+    prets.append(cible)
+
+
+def parcours_depuis_fichiers(args):
+    import fitconv
+
+    nom_force = args[args.index("--nom") + 1] if "--nom" in args[:-1] else None
+    fichiers = [a for i, a in enumerate(args) if a != "--nom" and (i == 0 or args[i - 1] != "--nom")]
+    if nom_force and len(fichiers) > 1:
+        sys.exit("--nom ne s'utilise qu'avec un seul fichier")
+    prets = []
+    for fichier in map(lambda a: Path(a).expanduser(), fichiers):
+        if not fichier.is_file():
+            print(f"  {fichier} : introuvable")
+            continue
+        contenu, ext = fichier.read_bytes(), fichier.suffix.lower()
+        if ext == ".fit" and fitconv.type_fit(contenu) in ("course", "workout"):
+            mettre_en_attente(nom_force or fichier.stem, contenu, prets)  # déjà au format de la montre
+            print(f"  {fichier.name} : prêt tel quel")
+            continue
+        nom, sport, points = fitconv.lire_parcours(contenu, ext)
+        try:
+            octets, distance = fitconv.parcours_fit(nom_force or nom or fichier.stem, sport, points)
+        except ValueError as e:
+            print(f"  {fichier.name} : ignoré ({e}, {len(points)} point(s) GPS)")
+            continue
+        mettre_en_attente(nom_force or nom or fichier.stem, octets, prets)
+        print(f"  {fichier.name} : parcours « {(nom_force or nom or fichier.stem)[:16]} », {distance / 1000:.1f} km")
+    return prets
+
+
+def parcours_depuis_garmin(demandes):
+    """Parcours (course-service) et entraînements (workout-service) de Garmin Connect, téléchargés en FIT : la même
+    chose que ce que l'appli du téléphone enverrait à la montre. Rien n'est modifié sur Garmin."""
+    api = connexion_garmin()
+    parcours = api.get_courses() or []
+    if isinstance(parcours, dict):
+        parcours = parcours.get("coursesForUser") or []
+    entrainements = api.get_workouts(0, 500) or []
+    elements = ([("parcours", c["courseId"], c.get("courseName") or "", f"{(c.get('distanceInMeters') or 0) / 1000:.1f} km",
+                  lambda i: api.download_course(i, "fit")) for c in parcours]
+                + [("entraînement", w["workoutId"], w.get("workoutName") or "",
+                    (w.get("sportType") or {}).get("sportTypeKey", ""), api.download_workout) for w in entrainements])
+    if not demandes:
+        for genre, ident, nom, detail, _ in elements:
+            print(f"  {genre:12} {ident:>12}  {nom}  ({detail})")
+        print(f"{len(elements)} élément(s). Pour les préparer : relais.py vers-montre garmin <nom ou numéro>…")
+        return []
+    prets = []
+    for demande in demandes:
+        choisis = [e for e in elements if demande == str(e[1]) or demande.lower() in e[2].lower()]
+        if not choisis:
+            print(f"  « {demande} » : rien de ce nom sur Garmin Connect")
+        for genre, ident, nom, detail, telecharger in choisis:
+            mettre_en_attente(nom or str(ident), telecharger(ident), prets)
+            print(f"  {genre} « {nom} » ({detail}) : prêt")
+    return prets
+
+
+def cmd_vers_montre():
+    """relais.py vers-montre <fichier…> [--nom NOM] | garmin [nom ou numéro…] : parcours et entraînements pour la
+    montre. Ils attendent dans VERS_MONTRE et sont déposés au prochain branchement, ou tout de suite si elle l'est."""
+    args = sys.argv[2:]
+    if not args:
+        sys.exit("Usage : relais.py vers-montre <trace.gpx|.tcx|.fit>… [--nom NOM]\n"
+                 "        relais.py vers-montre garmin [nom ou numéro…]  (sans nom : la liste de Garmin Connect)")
+    utiliser_venv()
+    prets = parcours_depuis_garmin(args[1:]) if args[0] == "garmin" else parcours_depuis_fichiers(args)
+    if not prets:
+        return
+    montre = trouver_montre()
+    if montre:
+        deposer_sur_montre(montre)
+        print("Débranchez la montre : elle importe les nouveaux fichiers à ce moment-là.")
+    else:
+        print(f"Montre non branchée : {len(prets)} fichier(s) attendent dans {VERS_MONTRE} (déposés au prochain branchement).")
+
+
 def cmd_etat():
     montre = trouver_montre()
     if montre:
@@ -200,6 +379,9 @@ def cmd_etat():
         activites = sorted((montre / "Garmin" / "Activity").glob("*.[fF][iI][tT]"))
         print(f"Montre       : branchée sur {montre}, mémoire {libre.used * 100 // libre.total} % utilisée")
         print(f"               {len(activites)} activité(s) dessus, la plus récente : {activites[-1].name if activites else 'aucune'}")
+        epo = fichier_epo(montre)
+        print("               données satellites : " + (f"depuis le {epo_debut(epo.read_bytes()):%d/%m/%Y}" if epo and epo.stat().st_size >= 3
+                                                       else "pas de RemoteSW/EPO.BIN"))
     else:
         print("Montre       : non branchée")
 
@@ -213,7 +395,7 @@ def cmd_etat():
         nb_envoyes = len(ENVOYES.read_text().split()) if ENVOYES.exists() else 0
         print(f"Archive      : {detail} ; {nb_envoyes} activité(s) déjà envoyée(s)")
     else:
-        print("Archive      : vide (lancez « sport.py montre »)")
+        print("Archive      : vide (lancez « relais.py montre »)")
 
 
 def sources():
@@ -240,7 +422,7 @@ def connexion_garmin():
     """Session Garmin Connect. Le mot de passe n'est demandé qu'à la première connexion, ensuite les jetons suffisent."""
     from garminconnect import Garmin
 
-    logging.getLogger("garminconnect").setLevel(logging.CRITICAL)  # les erreurs sont résumées par sport.py
+    logging.getLogger("garminconnect").setLevel(logging.CRITICAL)  # les erreurs sont résumées par relais.py
     JETONS_GARMIN.mkdir(parents=True, exist_ok=True)
     JETONS_GARMIN.chmod(0o700)
     try:
@@ -485,28 +667,28 @@ def envoyer_v2(nom, limite, reessayer=False):
 
 
 def cmd_envoyer():
-    """sport.py envoyer <destination> [N] [--reessayer] : tout ce qui reste (ou N activités), au rythme permis par le
+    """relais.py envoyer <destination> [N] [--reessayer] : tout ce qui reste (ou N activités), au rythme permis par le
     service (PAUSES) ; s'il demande d'attendre, l'envoi s'arrête proprement et reprend au lancement suivant."""
     args = sys.argv[2:]
     if not args or args[0] not in DESTINATIONS:
-        sys.exit(f"Usage : sport.py envoyer <{'|'.join(DESTINATIONS)}> [nombre, tout par défaut] [--reessayer]")
+        sys.exit(f"Usage : relais.py envoyer <{'|'.join(DESTINATIONS)}> [nombre, tout par défaut] [--reessayer]")
     utiliser_venv()
     nombres = [a for a in args[1:] if a.isdigit()]
     envoyer_v2(args[0], int(nombres[0]) if nombres else None, "--reessayer" in args)
 
 
-LOTS = PROJET / "a-importer"  # lots à importer à la main sur le site d'un service (sport.py lots)
+LOTS = PROJET / "a-importer"  # lots à importer à la main sur le site d'un service (relais.py lots)
 TAILLE_LOT = 900  # fichiers par lot : Runalyze conseille au plus 1000 à la fois dans le navigateur
 
 
 def cmd_lots():
-    """sport.py lots <destination> [--importes] : quand l'API d'un service bloque un gros historique (Runalyze et
+    """relais.py lots <destination> [--importes] : quand l'API d'un service bloque un gros historique (Runalyze et
     Cloudflare, 27/10/2026), copie les activités pas encore envoyées dans a-importer/<destination>/lot-N/, à glisser
     dans la page d'import du site. Une fois l'import fait, --importes les note envoyées dans le journal et range les
     lots dans a-supprimer/."""
     args = sys.argv[2:]
     if not args or args[0] not in DESTINATIONS:
-        sys.exit(f"Usage : sport.py lots <{'|'.join(DESTINATIONS)}> [--importes]")
+        sys.exit(f"Usage : relais.py lots <{'|'.join(DESTINATIONS)}> [--importes]")
     nom, dossier = args[0], LOTS / args[0]
     liste = dossier / "liste.csv"
     if "--importes" in args:
@@ -522,7 +704,7 @@ def cmd_lots():
         print(f"{nom} : {len(lignes)} activités notées « import manuel » ; lots rangés dans {rangement}")
         return
     if dossier.exists():
-        sys.exit(f"Des lots attendent déjà dans {dossier} : importez-les puis « sport.py lots {nom} --importes »")
+        sys.exit(f"Des lots attendent déjà dans {dossier} : importez-les puis « relais.py lots {nom} --importes »")
     _, _, a_faire = a_envoyer(nom)
     if not a_faire:
         print(f"{nom} : rien à importer")
@@ -543,7 +725,7 @@ def cmd_lots():
                         "duree_min": a["duree_min"]})
     lots = (len(a_faire) - 1) // TAILLE_LOT + 1
     print(f"{nom} : {len(a_faire)} activités copiées en {lots} lot(s) dans {dossier}")
-    print(f"  importez chaque lot sur le site, puis : sport.py lots {nom} --importes")
+    print(f"  importez chaque lot sur le site, puis : relais.py lots {nom} --importes")
 
 
 class Endurain:
@@ -685,11 +867,15 @@ def faire_sante(api_garmin=None):
     import sante
 
     print("Lecture des pas, du poids et du sommeil de toutes les sources…")
-    pas, poids, sommeil, lus = sante.collecter(list(sources().values()), EXCLUS_PROJET | {"convertis", SANTE.name})
+    racines = list(sources().values())
+    if not any(ARCHIVE.resolve().is_relative_to(r.resolve()) for r in racines):
+        racines.append(ARCHIVE)  # sauvegarde de la montre rangée hors des sources (chemins.yml)
+    pas, poids, sommeil, montre, lus = sante.collecter(racines, EXCLUS_PROJET | {"convertis", SANTE.name})
     print(f"  {lus['pas']} valeurs de pas, {lus['poids']} pesées, {lus['sommeil']} nuits lues ; {lus['écartés']} vides ou aberrantes écartées")
-    print(f"  retenu après dédoublonnage : {len(pas)} jours de pas, {len(poids)} jours de poids, {len(sommeil)} nuits")
-    sante.ecrire_csv(SANTE, pas, poids, sommeil)
-    print(f"  détail : {SANTE}/pas.csv, poids.csv, sommeil.csv")
+    print(f"  retenu après dédoublonnage : {len(pas)} jours de pas, {len(poids)} jours de poids, {len(sommeil)} nuits, "
+          f"{len(montre)} journées de la montre")
+    sante.ecrire_csv(SANTE, pas, poids, sommeil, montre)
+    print(f"  détail : {SANTE}/pas.csv, poids.csv, sommeil.csv, montre.csv")
     copier_sommeil()
     conf = config()
     if endurain_actif(conf):
@@ -753,13 +939,13 @@ def cmd_auto():
 
 
 def cmd_refaire():
-    """sport.py refaire garmin : retire de Garmin Connect les activités envoyées par l'ancienne version
+    """relais.py refaire garmin : retire de Garmin Connect les activités envoyées par l'ancienne version
     (outils/historique-v1/envoyes-garmin.csv : départ et distance de chacune), pour les remplacer par activites-v2.
 
     Une activité n'est retirée que si Garmin en a exactement une qui démarre à moins d'une minute et dont la
     distance correspond (2 % ou 20 m) : les autres sont signalées et laissées. Journal : historique-v1/.retirees-garmin.txt"""
     if sys.argv[2:3] != ["garmin"]:
-        sys.exit("Usage : sport.py refaire garmin")
+        sys.exit("Usage : relais.py refaire garmin")
     utiliser_venv()
     from datetime import datetime, timedelta, timezone
 
@@ -844,15 +1030,15 @@ def sur_le_service(nom):
 
 
 def cmd_retirer():
-    """sport.py retirer <garmin|endurain|smashrun> [--essai] : retire du service les activités que sport.py y a
+    """relais.py retirer <garmin|endurain|smashrun> [--essai] : retire du service les activités que relais.py y a
     envoyées et qui ne sont plus dans activites-v2/ (voir orphelines). Sur le service, on cherche la même durée (2 % +
     30 s), la même distance (2 % + 20 m, ou aucune) et le même départ (1 min, ou un peu plus tard : le service prend
     parfois le premier point de la trace) : l'exemplaire gardé, parti à la même seconde mais plus long, n'est pas touché.
-    S'il y en a plusieurs (copies d'une ancienne version ou d'une synchro), seule la dernière arrivée, celle de sport.py,
+    S'il y en a plusieurs (copies d'une ancienne version ou d'une synchro), seule la dernière arrivée, celle de relais.py,
     est retirée. --essai montre sans rien retirer."""
     args = sys.argv[2:]
     if not args or args[0] not in DESTINATIONS:
-        sys.exit(f"Usage : sport.py retirer <{'|'.join(DESTINATIONS)}> [--essai]")
+        sys.exit(f"Usage : relais.py retirer <{'|'.join(DESTINATIONS)}> [--essai]")
     nom, essai = args[0], "--essai" in args
     utiliser_venv()
     a_retirer = orphelines(nom)
@@ -918,7 +1104,7 @@ def copier_sommeil():
 
 
 def cmd_preparer():
-    """sport.py preparer : conversion précise (v2) de toutes les sources vers activites-v2/, puis audit.
+    """relais.py preparer : conversion précise (v2) de toutes les sources vers activites-v2/, puis audit.
 
     Voir analyse/ANALYSE.md : un lecteur par source (heure, fuseau, durée, sport), regroupement de la même sortie
     vue par plusieurs applis, meilleur exemplaire, filtres, un FIT par activité. L'ancienne version de
@@ -958,6 +1144,8 @@ def main():
     commandes = {
         "etat": cmd_etat,
         "montre": cmd_montre,
+        "vers-montre": cmd_vers_montre,
+        "satellites": cmd_satellites,
         "envoyer": cmd_envoyer,
         "sante": cmd_sante,
         "auto": cmd_auto,
@@ -974,7 +1162,7 @@ def main():
         try:
             fcntl.flock(verrou, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
-            sys.exit("Une autre commande sport.py est déjà en cours (terminal ou interface web) : attendez qu'elle finisse.")
+            sys.exit("Une autre commande relais.py est déjà en cours (terminal ou interface web) : attendez qu'elle finisse.")
     commandes[sys.argv[1]]()
 
 

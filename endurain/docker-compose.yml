@@ -31,9 +31,9 @@ services:
       - endurain-pgdata:/var/lib/postgresql/data
     restart: unless-stopped
 
-  # Interface web de outils/sport.py : conversion en FIT, tri, envoi vers Garmin Connect, sauvegarde de la montre
-  sport:
-    container_name: sport-outils
+  # Interface web de outils/relais.py : conversion en FIT, tri, envoi vers Garmin Connect, sauvegarde de la montre
+  relais:
+    container_name: relais
     build:
       context: ../outils
       args:  # chemins de l'ordinateur, définis dans .env (voir .env.example)

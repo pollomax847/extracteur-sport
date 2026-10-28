@@ -3,18 +3,20 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Outils sport</title>
+<title>Relais</title>
 <style>
   :root {
     --fond: #f3f5f8; --carte: #ffffff; --texte: #16202a; --doux: #5d6b78; --bord: #e1e6ec; --accent: #0a66c2;
     --accent-doux: #e7f0fb; --ok: #1a7f37; --ok-doux: #e6f4ea; --ko: #b42318; --ko-doux: #fdecea; --attente: #9a6700;
     --attente-doux: #fff4d6; --journal: #0f151b; --journal-texte: #d3dee8; --ombre: 0 1px 2px rgba(16, 24, 40, .06);
+    --serie: #0a66c2;
   }
   @media (prefers-color-scheme: dark) {
     :root {
       --fond: #0f1418; --carte: #171e24; --texte: #e3e9ef; --doux: #95a3b0; --bord: #263039; --accent: #5aa2ec;
       --accent-doux: #152536; --ok: #4cc26b; --ok-doux: #13261a; --ko: #f07167; --ko-doux: #2c1614; --attente: #e3b341;
       --attente-doux: #2a2414; --journal: #0a0e12; --ombre: none;
+      --serie: #4d94e0;
     }
   }
   * { box-sizing: border-box; }
@@ -80,13 +82,32 @@
   #message { min-height: 20px; margin: 10px 0 0; font-size: 14px; }
   .ok { color: var(--ok); } .ko { color: var(--ko); }
   a { color: var(--accent); }
+  .grille.graphiques { grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); }
+  .filtres { display: flex; gap: 4px; flex-wrap: wrap; }
+  .filtres button { padding: 4px 12px; font-size: 13px; background: transparent; color: var(--doux); border: 1px solid var(--bord); }
+  .filtres button[aria-pressed="true"] { background: var(--accent-doux); color: var(--accent); border-color: var(--accent-doux); }
+  .chiffre small { display: block; font-size: 12px; color: var(--doux); }
+  .graphique { position: relative; margin-top: 8px; }
+  .graphique svg { display: block; width: 100%; overflow: visible; }
+  .graphique text { font-size: 11px; fill: var(--doux); font-variant-numeric: tabular-nums; }
+  .graphique .grille-y { stroke: var(--bord); stroke-width: 1; }
+  .graphique .vide { font-size: 13px; color: var(--doux); padding: 24px 0; }
+  .infobulle { position: absolute; pointer-events: none; background: var(--carte); border: 1px solid var(--bord); border-radius: 8px;
+               padding: 6px 10px; font-size: 12.5px; box-shadow: 0 4px 12px rgba(16, 24, 40, .12); white-space: nowrap; z-index: 1; }
+  .infobulle b { display: block; font-size: 14px; }
+  .infobulle span { color: var(--doux); }
+  table.valeurs { width: 100%; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; margin-top: 8px; }
+  table.valeurs th, table.valeurs td { text-align: right; padding: 4px 8px; border-bottom: 1px solid var(--bord); }
+  table.valeurs th:first-child, table.valeurs td:first-child { text-align: left; }
+  table.valeurs th { color: var(--doux); font-weight: 500; }
+  .defilant { max-height: 320px; overflow: auto; }
   @media (max-width: 600px) { .barre .liens { margin-left: 0; } .chiffre b { font-size: 20px; } }
 </style>
 </head>
 <body>
 <header>
   <div class="barre">
-    <h1>Outils sport</h1>
+    <h1>Relais</h1>
     <div class="puces">
       <span class="puce" id="p-montre" title="Montre Garmin branchée en USB">Montre <b>…</b></span>
       <span class="puce" id="p-endurain" title="Endurain, votre bibliothèque locale (port 8080)">Endurain <b>…</b></span>
@@ -117,6 +138,27 @@
     <div class="categories" id="categories"></div>
   </div>
 
+  <div class="titre-section entete-carte"><span>Santé : une valeur par jour (sante/)</span>
+    <div class="filtres" id="periodes" role="group" aria-label="Période affichée">
+      <button data-periode="1an">1 an</button><button data-periode="3ans">3 ans</button><button data-periode="tout">Tout</button>
+    </div>
+  </div>
+  <div class="chiffres">
+    <div class="chiffre"><b id="s-pas">–</b><span>pas, dernière journée</span><small id="s-pas-date"></small></div>
+    <div class="chiffre"><b id="s-poids">–</b><span>dernière pesée</span><small id="s-poids-date"></small></div>
+    <div class="chiffre"><b id="s-sommeil">–</b><span>dernière nuit</span><small id="s-sommeil-date"></small></div>
+    <div class="chiffre"><b id="s-fc">–</b><span>FC de repos (montre)</span><small id="s-fc-date"></small></div>
+  </div>
+  <div class="grille graphiques" style="margin-top:12px">
+    <section class="carte"><h2>Pas par jour</h2><p class="aide" id="g-pas-aide"></p><div class="graphique" id="g-pas"></div></section>
+    <section class="carte"><h2>Sommeil par nuit</h2><p class="aide" id="g-sommeil-aide"></p><div class="graphique" id="g-sommeil"></div></section>
+    <section class="carte"><h2>Poids</h2><p class="aide">Chaque pesée retenue</p><div class="graphique" id="g-poids"></div></section>
+  </div>
+  <details class="carte" style="margin-top:12px"><summary>Voir les valeurs en tableau</summary>
+    <div class="defilant"><table class="valeurs"><thead><tr><th>Période</th><th>Pas par jour</th><th>Sommeil par nuit</th><th>Poids moyen</th></tr></thead>
+    <tbody id="t-sante"></tbody></table></div>
+  </details>
+
   <div class="titre-section">Envoyer vers les services</div>
   <div class="grille" id="destinations"></div>
 
@@ -134,9 +176,10 @@
     </section>
     <section class="carte">
       <h2>Montre et « Tout faire »</h2>
-      <p class="aide">Sauvegarde la montre branchée. « Tout faire » enchaîne montre, conversion, santé, puis les envois listés dans SPORT_AUTO_DESTINATIONS (aucun par défaut).</p>
+      <p class="aide">Sauvegarde la montre branchée, met à jour ses données satellites et lui dépose les parcours en attente (vers-montre/). « Tout faire » enchaîne montre, conversion, santé, puis les envois listés dans SPORT_AUTO_DESTINATIONS (aucun par défaut).</p>
       <div class="bas rangee">
         <button class="second" data-commande="montre">Sauvegarder la montre</button>
+        <button class="second" data-commande="satellites" title="Remplace l'EPO.BIN de la montre branchée, même s'il est récent">Satellites</button>
         <button data-commande="auto">Tout faire</button>
       </div>
     </section>
@@ -385,17 +428,17 @@ async function rafraichirJournal() {
     }
     const etaitEnCours = enCours;
     enCours = j.en_cours; commandeEnCours = j.en_cours ? j.commande : "";
-    $("titre-journal").textContent = j.commande ? `sport.py ${j.commande}` + (j.en_cours ? " — en cours" : j.code === 0 ? " — terminé" : ` — arrêté (code ${j.code})`) : "Aucune commande lancée";
+    $("titre-journal").textContent = j.commande ? `relais.py ${j.commande}` + (j.en_cours ? " — en cours" : j.code === 0 ? " — terminé" : ` — arrêté (code ${j.code})`) : "Aucune commande lancée";
     puce("p-tache", j.en_cours ? "attente" : "", j.en_cours ? j.commande.split(" ").slice(0, 2).join(" ") : "aucune");
     $("arreter").hidden = !j.en_cours;
     if (!j.en_cours) $("bloc-avancement").hidden = true;
     $("bandeau").hidden = !j.en_cours;
     $("bandeau-texte").textContent = j.en_cours
-      ? `« sport.py ${j.commande} » est en cours : les autres boutons sont bloqués jusqu'à la fin (suivi dans le journal en bas).` : "";
+      ? `« relais.py ${j.commande} » est en cours : les autres boutons sont bloqués jusqu'à la fin (suivi dans le journal en bas).` : "";
     document.querySelectorAll("button[data-commande]").forEach((b) => {
       b.disabled = j.en_cours; b.title = j.en_cours ? "Une commande est déjà en cours" : "";
     });
-    if (etaitEnCours !== enCours) rafraichirEtat();
+    if (etaitEnCours !== enCours) { rafraichirEtat(); if (!enCours) chargerSante(); }
   } catch (err) { /* idem */ }
 }
 
@@ -434,7 +477,212 @@ for (const [cle, titre] of [["strava", "Strava"], ["smashrun", "Smashrun"]]) {  
   message(retour === "ok" ? `${titre} autorisé.` : `${titre} : ${retour}`, retour !== "ok");
   history.replaceState(null, "", "/");
 }
+// --- Santé : trois graphiques d'une seule série sur la même période, et le tableau des mêmes valeurs
+const SANTE = { donnees: null, periode: "tout" };
+const PERIODES = { "1an": 365, "3ans": 3 * 365, "tout": null };
+const SVG = "http://www.w3.org/2000/svg";
+const jourDe = (texte) => new Date(texte + "T12:00:00");
+const dateFr = (d) => d.toLocaleDateString("fr-FR");
+const formats = {
+  pas: (v) => nombre(Math.round(v)),
+  sommeil: (v) => { const m = Math.round(v * 60); return `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, "0")}`; },
+  poids: (v) => `${v.toLocaleString("fr-FR", { minimumFractionDigits: 1, maximumFractionDigits: 1 })} kg`,
+};
+
+function pasDeTemps(jours) { return jours <= 120 ? "jour" : jours <= 730 ? "semaine" : jours <= 5 * 365 ? "mois" : "trimestre"; }
+
+function debutTranche(d, pas) {
+  const t = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  if (pas === "semaine") t.setDate(t.getDate() - (t.getDay() + 6) % 7);
+  if (pas === "mois" || pas === "trimestre") t.setDate(1);
+  if (pas === "trimestre") t.setMonth(t.getMonth() - t.getMonth() % 3);
+  return t;
+}
+
+function finTranche(t, pas) {
+  const f = new Date(t);
+  if (pas === "jour") f.setDate(f.getDate() + 1);
+  else if (pas === "semaine") f.setDate(f.getDate() + 7);
+  else f.setMonth(f.getMonth() + (pas === "mois" ? 1 : 3));
+  return f;
+}
+
+function nomTranche(t, pas) {
+  if (pas === "jour") return dateFr(t);
+  if (pas === "semaine") return `semaine du ${dateFr(t)}`;
+  if (pas === "mois") return t.toLocaleDateString("fr-FR", { month: "long", year: "numeric" });
+  const n = t.getMonth() / 3 + 1;
+  return `${n}${n === 1 ? "er" : "e"} trimestre ${t.getFullYear()}`;
+}
+
+function tranches(serie, pas, debut) {
+  const parTranche = new Map();
+  for (const [texte, v] of serie) {
+    const d = jourDe(texte);
+    if (v == null || d < debut) continue;
+    const t = debutTranche(d, pas);
+    const e = parTranche.get(+t) || { debut: t, fin: finTranche(t, pas), somme: 0, n: 0 };
+    e.somme += v; e.n++; parTranche.set(+t, e);
+  }
+  return [...parTranche.values()].map((e) => ({ ...e, v: e.somme / e.n })).sort((a, b) => a.debut - b.debut);
+}
+
+function graduations(min, max, nb = 4) {
+  const brut = (max - min) / nb || 1, puissance = 10 ** Math.floor(Math.log10(brut));
+  const pas = [1, 2, 2.5, 5, 10].map((m) => m * puissance).find((p) => p >= brut);
+  const ticks = [];
+  for (let v = Math.floor(min / pas) * pas; v <= max + pas * 1e-9; v += pas) ticks.push(+v.toFixed(6));
+  if (ticks[ticks.length - 1] < max) ticks.push(ticks[ticks.length - 1] + pas);
+  return ticks;
+}
+
+function element(nom, attributs, parent) {
+  const e = document.createElementNS(SVG, nom);
+  for (const [k, v] of Object.entries(attributs)) e.setAttribute(k, v);
+  if (parent) parent.append(e);
+  return e;
+}
+
+function infobulle(conteneur, x, y, valeur, libelle) {
+  let bulle = conteneur.querySelector(".infobulle");
+  if (!bulle) { bulle = document.createElement("div"); bulle.className = "infobulle"; conteneur.append(bulle); }
+  const b = document.createElement("b"), s = document.createElement("span");
+  b.textContent = valeur; s.textContent = libelle;
+  bulle.replaceChildren(b, s); bulle.hidden = false;
+  const largeur = bulle.offsetWidth;
+  bulle.style.left = `${Math.max(0, Math.min(conteneur.clientWidth - largeur, x - largeur / 2))}px`;
+  bulle.style.top = `${Math.max(0, y - bulle.offsetHeight - 10)}px`;
+}
+
+function cacherInfobulle(conteneur) { const b = conteneur.querySelector(".infobulle"); if (b) b.hidden = true; }
+
+// Un graphique : colonnes (moyenne par tranche, depuis zéro) ou ligne (chaque pesée, coupée sur les longues absences)
+function graphique(conteneur, { valeurs, forme, debut, fin, format, pas }) {
+  conteneur.replaceChildren();
+  if (!valeurs.length) {
+    const vide = document.createElement("div"); vide.className = "vide"; vide.textContent = "Aucune valeur sur cette période.";
+    conteneur.append(vide); return;
+  }
+  const largeur = Math.max(260, conteneur.clientWidth), hauteur = 190, marge = { haut: 10, droite: 8, bas: 22, gauche: 44 };
+  const svg = element("svg", { viewBox: `0 0 ${largeur} ${hauteur}`, height: hauteur, role: "img" }, conteneur);
+  const x = (d) => marge.gauche + (largeur - marge.gauche - marge.droite) * (d - debut) / (fin - debut);
+  const vs = valeurs.map((p) => p.v);
+  const [mini, maxi] = forme === "colonnes" ? [0, Math.max(...vs)] : [Math.min(...vs) - 1, Math.max(...vs) + 1];
+  const ticks = graduations(mini, maxi);
+  const y = (v) => hauteur - marge.bas - (hauteur - marge.haut - marge.bas) * (v - ticks[0]) / (ticks[ticks.length - 1] - ticks[0]);
+  for (const t of ticks) {
+    element("line", { x1: marge.gauche, x2: largeur - marge.droite, y1: y(t), y2: y(t), class: "grille-y" }, svg);
+    element("text", { x: marge.gauche - 6, y: y(t) + 4, "text-anchor": "end" }, svg).textContent =
+      t >= 1000 ? `${(t / 1000).toLocaleString("fr-FR")} k` : t.toLocaleString("fr-FR");
+  }
+  // repères de temps : années, ou mois sur une courte période, espacés d'au moins 56 px
+  const annees = (fin - debut) / 864e5 > 540;
+  const reperes = [];
+  for (let d = new Date(debut.getFullYear(), annees ? 0 : debut.getMonth() + 1, 1); d <= fin; annees ? d.setFullYear(d.getFullYear() + 1) : d.setMonth(d.getMonth() + 1))
+    if (d >= debut) reperes.push(new Date(d));
+  const saut = Math.max(1, Math.ceil(56 / ((largeur - marge.gauche - marge.droite) / Math.max(1, reperes.length))));
+  reperes.filter((_, i) => i % saut === 0).forEach((d) => {
+    element("text", { x: x(d), y: hauteur - 6, "text-anchor": "middle" }, svg).textContent =
+      annees ? d.getFullYear() : d.toLocaleDateString("fr-FR", { month: "short" }) + (d.getMonth() === 0 ? ` ${d.getFullYear()}` : "");
+  });
+  const base = y(ticks[0]);
+  element("line", { x1: marge.gauche, x2: largeur - marge.droite, y1: base, y2: base, stroke: "var(--doux)", "stroke-width": 1, opacity: .5 }, svg);
+
+  if (forme === "colonnes") {
+    for (const p of valeurs) {
+      const fente = x(p.fin) - x(p.debut), l = Math.max(1, Math.min(24, fente - 2)), gauche = x(p.debut) + (fente - l) / 2;
+      const h = Math.max(1, base - y(p.v)), r = Math.min(4, l / 2, h), haut = base - h;
+      element("path", { fill: "var(--serie)",
+        d: `M${gauche},${base}V${haut + r}Q${gauche},${haut} ${gauche + r},${haut}H${gauche + l - r}Q${gauche + l},${haut} ${gauche + l},${haut + r}V${base}Z` }, svg);
+      // zone de survol : toute la hauteur de la tranche, plus large que la colonne
+      const zone = element("rect", { x: x(p.debut), y: marge.haut, width: Math.max(fente, 6), height: base - marge.haut, fill: "transparent" }, svg);
+      const libelle = nomTranche(p.debut, pas) + (pas === "jour" ? "" : ` · moyenne de ${p.n} jour${p.n > 1 ? "s" : ""}`);
+      zone.addEventListener("pointerenter", () => infobulle(conteneur, gauche + l / 2, haut, format(p.v), libelle));
+      zone.addEventListener("pointerleave", () => cacherInfobulle(conteneur));
+    }
+    return;
+  }
+  // ligne : interrompue quand deux pesées sont à plus de 180 jours l'une de l'autre
+  let chemin = "";
+  valeurs.forEach((p, i) => {
+    const coupure = i === 0 || p.debut - valeurs[i - 1].debut > 180 * 864e5;
+    chemin += `${coupure ? "M" : "L"}${x(p.debut).toFixed(1)},${y(p.v).toFixed(1)}`;
+  });
+  element("path", { d: chemin, fill: "none", stroke: "var(--serie)", "stroke-width": 2, "stroke-linejoin": "round", "stroke-linecap": "round" }, svg);
+  const derniere = valeurs[valeurs.length - 1];
+  element("circle", { cx: x(derniere.debut), cy: y(derniere.v), r: 4, fill: "var(--serie)", stroke: "var(--carte)", "stroke-width": 2 }, svg);
+  const repere = element("line", { y1: marge.haut, y2: base, stroke: "var(--doux)", "stroke-width": 1, visibility: "hidden" }, svg);
+  const point = element("circle", { r: 4, fill: "var(--serie)", stroke: "var(--carte)", "stroke-width": 2, visibility: "hidden" }, svg);
+  const zone = element("rect", { x: marge.gauche, y: marge.haut, width: largeur - marge.gauche - marge.droite, height: base - marge.haut, fill: "transparent" }, svg);
+  zone.addEventListener("pointermove", (ev) => {
+    const cadre = svg.getBoundingClientRect(), px = (ev.clientX - cadre.left) * largeur / cadre.width;
+    const p = valeurs.reduce((a, b) => Math.abs(x(b.debut) - px) < Math.abs(x(a.debut) - px) ? b : a);
+    for (const [e, attr] of [[repere, { x1: x(p.debut), x2: x(p.debut) }], [point, { cx: x(p.debut), cy: y(p.v) }]]) {
+      for (const [k, v] of Object.entries(attr)) e.setAttribute(k, v);
+      e.setAttribute("visibility", "visible");
+    }
+    infobulle(conteneur, x(p.debut) * cadre.width / largeur, y(p.v), format(p.v), `pesée du ${dateFr(p.debut)}`);
+  });
+  zone.addEventListener("pointerleave", () => {
+    repere.setAttribute("visibility", "hidden"); point.setAttribute("visibility", "hidden"); cacherInfobulle(conteneur);
+  });
+}
+
+function derniere(serie, i = 1) { return [...serie].reverse().find((l) => l[i] != null); }
+
+function tuile(id, ligne, format, i = 1) {
+  $(id).textContent = ligne ? format(ligne[i]) : "–";
+  $(`${id}-date`).textContent = ligne ? `le ${dateFr(jourDe(ligne[0]))}` : "aucune valeur";
+}
+
+function afficherSante() {
+  const s = SANTE.donnees; if (!s) return;
+  document.querySelectorAll("#periodes button").forEach((b) => b.setAttribute("aria-pressed", b.dataset.periode === SANTE.periode));
+  tuile("s-pas", derniere(s.pas), formats.pas);
+  tuile("s-poids", derniere(s.poids), formats.poids);
+  tuile("s-sommeil", derniere(s.sommeil), formats.sommeil);
+  tuile("s-fc", derniere(s.montre, 2), (v) => `${Math.round(v)} bpm`, 2);
+  const fin = new Date(), toutes = [...s.pas, ...s.poids, ...s.sommeil].map((l) => jourDe(l[0]));
+  const jours = PERIODES[SANTE.periode];
+  const debut = jours ? new Date(fin - jours * 864e5) : new Date(Math.min(...toutes, +fin - 864e5));
+  const pas = pasDeTemps((fin - debut) / 864e5);
+  const parTranche = { pas: tranches(s.pas, pas, debut), sommeil: tranches(s.sommeil, pas, debut), poids: tranches(s.poids, pas, debut) };
+  const moyenne = { jour: "Valeur de chaque jour", semaine: "Moyenne par semaine", mois: "Moyenne par mois", trimestre: "Moyenne par trimestre" }[pas];
+  $("g-pas-aide").textContent = `${moyenne}, sur les jours mesurés`;
+  $("g-sommeil-aide").textContent = `${moyenne}, sur les nuits mesurées`;
+  graphique($("g-pas"), { valeurs: parTranche.pas, forme: "colonnes", debut, fin, format: formats.pas, pas });
+  graphique($("g-sommeil"), { valeurs: parTranche.sommeil, forme: "colonnes", debut, fin, format: formats.sommeil, pas });
+  graphique($("g-poids"), { valeurs: s.poids.filter((l) => l[1] != null && jourDe(l[0]) >= debut).map((l) => ({ debut: jourDe(l[0]), v: l[1] })),
+                            forme: "ligne", debut, fin, format: formats.poids });
+  // tableau : les mêmes tranches, la plus récente en haut
+  const lignes = new Map();
+  for (const [cle, liste] of Object.entries(parTranche))
+    for (const t of liste) (lignes.get(+t.debut) || lignes.set(+t.debut, { debut: t.debut }).get(+t.debut))[cle] = t.v;
+  $("t-sante").replaceChildren(...[...lignes.values()].sort((a, b) => b.debut - a.debut).map((l) => {
+    const tr = document.createElement("tr");
+    for (const texte of [nomTranche(l.debut, pas), l.pas != null ? formats.pas(l.pas) : "", l.sommeil != null ? formats.sommeil(l.sommeil) : "",
+                         l.poids != null ? formats.poids(l.poids) : ""]) {
+      const td = document.createElement("td"); td.textContent = texte; tr.append(td);
+    }
+    return tr;
+  }));
+}
+
+async function chargerSante() {
+  try { SANTE.donnees = await api("/api/sante"); afficherSante(); } catch (err) { /* serveur en redémarrage */ }
+}
+
+document.querySelectorAll("#periodes button").forEach((b) => b.addEventListener("click", () => {
+  SANTE.periode = b.dataset.periode;
+  try { localStorage.setItem("sante-periode", SANTE.periode); } catch (err) { /* stockage indisponible */ }
+  afficherSante();
+}));
+try { SANTE.periode = PERIODES.hasOwnProperty(localStorage.getItem("sante-periode")) ? localStorage.getItem("sante-periode") : "tout"; } catch (err) { /* idem */ }
+let redessin = 0;
+window.addEventListener("resize", () => { cancelAnimationFrame(redessin); redessin = requestAnimationFrame(afficherSante); });
+
 construireDestinations();
+chargerSante();
 rafraichirJournal().then(rafraichirEtat);
 setInterval(rafraichirJournal, 1000);
 setInterval(rafraichirEtat, 5000);

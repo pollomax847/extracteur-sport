@@ -12,7 +12,7 @@ donnees: .
 sources:
   # zepp: ~/projects/zepp-fit-files
 
-# Résultat de « sport.py preparer » : une activité FIT par sortie
+# Résultat de « relais.py preparer » : une activité FIT par sortie
 activites: activites-v2
 
 # Pas, poids et sommeil retenus (CSV)
@@ -20,6 +20,9 @@ sante: sante
 
 # Sauvegarde des fichiers de la montre Garmin
 montre: montre-garmin
+
+# Parcours et entraînements en attente du prochain branchement de la montre (relais.py vers-montre)
+vers_montre: vers-montre
 
 # Anciennes versions des activités, jamais effacées par l'outil
 corbeille: a-supprimer
