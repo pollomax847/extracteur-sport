@@ -402,8 +402,9 @@ def a_envoyer(nom, reessayer=False):
             continue
         if not proposee(nom, a):
             continue
-        if a["source"] == "Health Sync" and a["enregistreur"] == ORIGINE_SERVICE.get(nom):
-            doublons.append((a, f"deja : vient de {a['enregistreur']} (lue par Health Sync)"))
+        if a["enregistreur"] == ORIGINE_SERVICE.get(nom):  # la montre Garmin se synchronise elle-même avec Garmin
+            doublons.append((a, f"deja : vient de {a['enregistreur']}"
+                                + (" (lue par Health Sync)" if a["source"] == "Health Sync" else "")))
         elif export and export in {a["source"], *a["autres_sources"].split(", ")}:
             doublons.append((a, f"deja : présente dans l'export {export}"))
         elif a["fichier"] not in etat and (ancien := deja_envoyee(a, envoyees)):
