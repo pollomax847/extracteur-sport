@@ -33,7 +33,7 @@ import urllib.parse
 import urllib.request
 import uuid
 from collections import Counter
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 PROJET = Path(__file__).resolve().parent.parent
@@ -65,7 +65,7 @@ JETONS_GARMIN = Path.home() / ".config" / "sport" / "garmin-jetons"
 JETONS_STRAVA = Path.home() / ".config" / "sport" / "strava.json"
 VENV = Path.home() / ".local" / "share" / "sport" / "venv"
 VERROU = PROJET / "outils" / ".verrou"
-COMMANDES_EXCLUSIVES = {"envoyer", "sante", "auto", "refaire", "preparer", "lots"}
+COMMANDES_EXCLUSIVES = {"envoyer", "sante", "auto", "refaire", "retirer", "preparer", "lots"}
 V2 = chemin(CHEMINS.get("activites", "activites-v2"))  # conversion précise : une activité par sortie réelle (sport.py preparer)
 CORBEILLE = chemin(CHEMINS.get("corbeille", "a-supprimer"))  # anciennes versions de activites-v2 (jamais effacées par l'outil)
 SANTE = chemin(CHEMINS.get("sante", "sante"))  # pas, poids et sommeil retenus, en CSV lisibles
@@ -390,7 +390,7 @@ def a_envoyer(nom, reessayer=False):
     etat = etat_envois(nom)
     envoyees = []
     for fichier, statut, debut, duree in lignes_envois(nom):
-        if not statut.startswith("refuse"):
+        if not statut.startswith("refuse") and etat[fichier] != "retiree":
             m = re.search(r"(\d{4}-\d\d-\d\d)_(\d\d)(\d\d)(\d\d)", fichier)  # nom = départ UTC
             debut = debut or (m and f"{m[1]}T{m[2]}:{m[3]}:{m[4]}+00:00")
             if debut:
@@ -797,6 +797,108 @@ def cmd_refaire():
     print(", ".join(f"{n} {s}" for s, n in compte.items()))
 
 
+def orphelines(nom):
+    """Activités envoyées à un service qui ne sont plus dans activites-v2/ et dont aucune activité actuelle n'a besoin
+    (ex. le moins bon exemplaire de deux activités au même départ, confondues après coup) : [ligne du journal]."""
+    with (V2 / "index.csv").open() as f:
+        actuelles = {a["fichier"] for a in csv.DictReader(f)}
+    etat = etat_envois(nom)
+    # une activité actuelle « envoyée sous » un ancien nom a besoin de cet envoi-là
+    utiles = {s.split("envoyée sous ", 1)[1] for f, s in etat.items() if f in actuelles and "envoyée sous " in s}
+    vues = set()
+    lignes = []
+    for l in lignes_envois(nom):
+        if etat[l[0]] == "envoye" and l[0] not in actuelles and l[0] not in utiles and l[2] and l[0] not in vues:
+            vues.add(l[0])
+            lignes.append(l)
+    return lignes
+
+
+def sur_le_service(nom):
+    """(liste(jour) → [(identifiant, départ UTC, durée s, distance m ou None)], supprimer(identifiant)) pour les
+    services qui permettent de retirer une activité."""
+    import destinations
+
+    if nom == "garmin":
+        api = connexion_garmin()
+
+        def liste(jour):
+            return [(a["activityId"], datetime.fromisoformat(a["startTimeGMT"]).replace(tzinfo=timezone.utc), a.get("duration") or 0,
+                     a.get("distance")) for a in api.get_activities_by_date(jour.isoformat(), (jour + timedelta(days=1)).isoformat()) or []]
+        return liste, api.delete_activity
+    if nom == "endurain":
+        session = Endurain(config())
+
+        def liste(jour):
+            r = session.appel("GET", f"/activities?start_date={jour - timedelta(days=1)}&end_date={jour + timedelta(days=1)}"
+                                     "&page_number=1&num_records=200")
+            return [(a["id"], datetime.fromisoformat(a["start_time"]), a.get("total_elapsed_time") or 0, a.get("distance"))
+                    for a in r["items"]]
+        return liste, lambda i: session.appel("DELETE", f"/activities/{i}")
+    if nom == "smashrun":
+        service = destinations.Smashrun(config())
+        toutes = service.activites()
+        return (lambda jour: [a for a in toutes if abs((a[1].date() - jour).days) <= 1]), service.supprimer
+    raise SystemExit(f"{nom} ne permet pas de retirer une activité par son API : à faire sur son site")
+
+
+def cmd_retirer():
+    """sport.py retirer <garmin|endurain|smashrun> [--essai] : retire du service les activités que sport.py y a
+    envoyées et qui ne sont plus dans activites-v2/ (voir orphelines). Sur le service, on cherche la même durée (2 % +
+    30 s), la même distance (2 % + 20 m, ou aucune) et le même départ (1 min, ou un peu plus tard : le service prend
+    parfois le premier point de la trace) : l'exemplaire gardé, parti à la même seconde mais plus long, n'est pas touché.
+    S'il y en a plusieurs (copies d'une ancienne version ou d'une synchro), seule la dernière arrivée, celle de sport.py,
+    est retirée. --essai montre sans rien retirer."""
+    args = sys.argv[2:]
+    if not args or args[0] not in DESTINATIONS:
+        sys.exit(f"Usage : sport.py retirer <{'|'.join(DESTINATIONS)}> [--essai]")
+    nom, essai = args[0], "--essai" in args
+    utiliser_venv()
+    a_retirer = orphelines(nom)
+    print(f"{nom} : {len(a_retirer)} activité(s) envoyée(s) qui ne sont plus dans la bibliothèque")
+    if not a_retirer:
+        return
+    if nom not in ("garmin", "endurain", "smashrun"):
+        for fichier, _, debut, duree in a_retirer:
+            print(f"  {debut[:16].replace('T', ' ')} UTC, {duree} min : {fichier}")
+        sys.exit(f"{nom} ne permet pas de retirer une activité par son API : à retirer sur son site")
+    liste, supprimer = sur_le_service(nom)
+    compte = Counter()
+    with journal_envois(nom).open("a") as journal:
+        for fichier, _, debut, duree in a_retirer:
+            depart, secondes = datetime.fromisoformat(debut), float(duree) * 60
+            distance = distance_envoyee(fichier)
+            candidates = [a for a in liste(depart.astimezone(timezone.utc).date())
+                          if -60 <= (a[1] - depart).total_seconds() <= max(60, secondes / 3)
+                          and abs(a[2] - secondes) <= 0.02 * secondes + 30
+                          and abs((a[3] or 0) - (distance or 0)) <= 0.02 * (distance or 0) + 20]
+            if not candidates:
+                print(f"  {fichier} : introuvable sur {nom}, laissée")
+                compte["introuvables"] += 1
+                continue
+            identifiant = max(c[0] for c in candidates)  # numéros croissants : la dernière arrivée
+            if essai:
+                print(f"  {fichier} → {nom} n° {identifiant}" + (f" (sur {len(candidates)} copies)" if len(candidates) > 1 else ""))
+                compte["à retirer"] += 1
+                continue
+            supprimer(identifiant)
+            journal.write(f"{fichier}\tretiree\t{debut}\t{duree}\n")
+            journal.flush()
+            compte["retirées"] += 1
+            time.sleep(1)
+    print(", ".join(f"{n} {s}" for s, n in compte.items()))
+
+
+def distance_envoyee(fichier):
+    """Distance (m) d'une activité envoyée, d'après la version de activites-v2/ où elle figurait (a-supprimer/), ou None."""
+    for index in sorted(CORBEILLE.glob(f"*/{V2.name}/index.csv"), reverse=True):
+        with index.open() as f:
+            for a in csv.DictReader(f):
+                if a["fichier"] == fichier:
+                    return float(a["distance_km"]) * 1000 if a["distance_km"] else None
+    return None
+
+
 def ecrire_config(**valeurs):
     """Ajoute ou remplace des clés dans sport.env (lisible par vous seul)."""
     lignes = CONFIG.read_text().splitlines() if CONFIG.exists() else []
@@ -859,6 +961,7 @@ def main():
         "sante": cmd_sante,
         "auto": cmd_auto,
         "refaire": cmd_refaire,
+        "retirer": cmd_retirer,
         "preparer": cmd_preparer,
         "lots": cmd_lots,
     }

@@ -243,11 +243,21 @@ class Smashrun:
     def presentes(self):
         """[(départ UTC, durée s)] des courses déjà sur le compte, quelle que soit l'appli qui les y a mises (Garmin,
         Strava… : 567 courses le 27/10/2026, dont 209 que sport.py aurait renvoyées en double)."""
+        return [(debut, duree) for _, debut, duree, _ in self.activites()]
+
+    def activites(self):
+        """[(identifiant, départ UTC, durée s, distance m)] de toutes les courses du compte."""
         statut, liste = _requete(f"{self.URL}/my/activities/search", entetes=self._entetes())
         if statut != 200 or not isinstance(liste, list):
             raise NonConfiguree(f"Smashrun : liste des courses illisible ({statut})")
-        return [(datetime.fromisoformat(a["startDateTimeLocal"]).astimezone(timezone.utc), float(a.get("duration") or 0))
+        return [(a["activityId"], datetime.fromisoformat(a["startDateTimeLocal"]).astimezone(timezone.utc),
+                 float(a.get("duration") or 0), float(a.get("distance") or 0) * 1000)
                 for a in liste if a.get("startDateTimeLocal")]
+
+    def supprimer(self, identifiant):
+        statut, reponse = _requete(f"{self.URL}/my/activities/{identifiant}", "DELETE", entetes=self._entetes())
+        if statut not in (200, 204):
+            raise RuntimeError(f"Smashrun refuse de retirer la course {identifiant} ({statut} {str(reponse)[:120]})")
 
     def envoyer(self, fichier, activite):
         if activite.get("trace") == "True":
